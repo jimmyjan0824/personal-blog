@@ -10,6 +10,9 @@ description: 以 MySQL 8.0 為主，整理 GTID 主從複製、半同步、平�
 
 {% include mysql-ops-series.md %}
 
+> **動手實作**：本篇提到的五種 HA 機制，另有以 Percona Server for MySQL 8.0.46 / Rocky Linux 9 從安裝到驗證的實作篇：[GTID 主從複製]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %})、[半同步複製]({% post_url 2026-10-24-mysql-ha-lab-02-semi-sync %})、[平行複製]({% post_url 2026-10-24-mysql-ha-lab-03-parallel-replication %})、[Group Replication]({% post_url 2026-10-24-mysql-ha-lab-04-group-replication %})、[InnoDB Cluster]({% post_url 2026-10-24-mysql-ha-lab-05-innodb-cluster %})。
+{: .prompt-tip }
+
 ## 先定義 RPO 與 RTO
 
 - **RPO（Recovery Point Objective）**：最多能接受遺失多少資料。
@@ -23,6 +26,8 @@ description: 以 MySQL 8.0 為主，整理 GTID 主從複製、半同步、平�
 | 跨機房 ClusterSet / 非同步 DR | 秒級 | 分鐘 | 異地備援 |
 
 ## GTID 主從複製
+
+實作步驟：[MySQL 高可用實作 01]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %})。
 
 8.0 建議一律使用 GTID，切換與重建從庫都簡單很多。
 
@@ -62,6 +67,8 @@ SHOW REPLICA STATUS\G
 
 ## 半同步複製
 
+實作步驟：[MySQL 高可用實作 02]({% post_url 2026-10-24-mysql-ha-lab-02-semi-sync %})。
+
 半同步保證：主庫 commit 回應客戶端前，至少有一台從庫已收到並寫入 relay log。
 
 ```sql
@@ -83,6 +90,8 @@ STOP REPLICA IO_THREAD; START REPLICA IO_THREAD;
 
 ## 平行複製：降低延遲
 
+實作步驟：[MySQL 高可用實作 03]({% post_url 2026-10-24-mysql-ha-lab-03-parallel-replication %})。
+
 ```ini
 replica_parallel_type          = LOGICAL_CLOCK
 replica_parallel_workers       = 8
@@ -93,6 +102,8 @@ binlog_transaction_dependency_tracking = WRITESET   # 僅 8.0，8.4 已移除且
 8.0.27 起，`replica_parallel_workers` 預設 4、`replica_parallel_type` 預設 `LOGICAL_CLOCK`、`replica_preserve_commit_order` 預設 `ON`，也就是平行複製預設開啟。
 
 ## Group Replication 與 InnoDB Cluster
+
+實作步驟：[Group Replication]({% post_url 2026-10-24-mysql-ha-lab-04-group-replication %})、[InnoDB Cluster]({% post_url 2026-10-24-mysql-ha-lab-05-innodb-cluster %})。
 
 Group Replication（MGR）基於 Paxos 協定，提交前需多數節點同意，能做到 RPO = 0 與自動選主。官方把它包裝成 **InnoDB Cluster**：
 
