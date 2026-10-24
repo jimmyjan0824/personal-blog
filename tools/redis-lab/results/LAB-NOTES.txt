@@ -1,0 +1,81 @@
+Redis 7.4.11 lab run — 2026-10-24 (Asia/Taipei timestamps in logs; Redis logs are UTC)
+
+Host: Mac16,12 (Apple M4, arm64), macOS 15.7.4
+Docker Desktop 4.96.3 (Engine 29.9.2, Compose v5.6.1), VM kernel 7.0.14-linuxkit, 10 CPU, ~7.7 GiB RAM
+Containers: rockylinux:9 (9.3) aarch64 + systemd, privileged, cgroup host
+
+Result: 00-build, 10-standalone, 20-sentinel, 30-cluster all finished (exit 0).
+Logs in this folder are from the final clean run of each script.
+
+Failover timings (final run)
+- Sentinel, SENTINEL FAILOVER (planned): +try-failover -> +switch-master 2.3 s;
+  old master rs1 back as replica with link up 17 s after the command.
+- Sentinel, docker pause master (down-after 5000): new master visible to clients after 7 s
+  (pause at 06:34:33 UTC, 1 s resolution: +sdown/+odown/+try-failover at 06:34:39.0-39.1, +promoted-slave 39.5, +switch-master 40.2).
+  Paused old master after unpause: +convert-to-slave after 10 s, link up after 16 s.
+- Cluster, docker pause rc1 (cluster-node-timeout 5000): rc5 promoted, observed after 9 s
+  (pause at 06:35:40 UTC: FAIL message 06:35:47.8, election delayed 919 ms, won 06:35:48.8). rc1 rejoined as replica with partial resync.
+- Cluster, CLUSTER FAILOVER (manual) on rc1: completes within the same second.
+- Cluster, pause rc2 + its replica rc6: cluster_state:fail, CLUSTERDOWN on all keys; after unpause back to ok.
+  Note: after unpause rc6 ended up as the master of that shard (rc2 became its replica).
+
+Lab-script fixes
+1. lib.sh cmpconf: used `redis-cli --no-raw ... | sed -n 2p`, which returns `2) "value"`, so every key
+   was reported as DIFF. Now uses raw output. After the fix: standalone and sentinel 0 DIFF; cluster only `databases`.
+2. lib.sh x(): REDISCLI_AUTH was also sent to Sentinel (no password) -> "AUTH failed" noise on every
+   `redis-cli -p 26379` line. Added a redis-cli wrapper inside the container that unsets REDISCLI_AUTH for -p 263xx.
+   The printed commands are unchanged.
+3. 10-standalone: `REDISCLI_AUTH= redis-cli` still sends AUTH with an empty password (AUTH failed / WRONGPASS lines).
+   Changed to `env -u REDISCLI_AUTH redis-cli`.
+4. 10-standalone: the 8.10.2 build ran `make` (= build with bundled modules), which failed (rc=2) on
+   redisbloom/redisearch/redisjson/redistimeseries. Changed to `make ... build redis` (core only), rc=0.
+5. 10-standalone: `diff` is not installed in rocky9-base, so redis.conf-template-diff.txt was empty.
+   The helper now installs diffutils quietly before diffing (not printed in the log).
+6. 10-standalone: `DEBUG POPULATE` and `DEBUG SLEEP` are rejected (enable-debug-command defaults to no),
+   so the 100k-key load did nothing (dbsize 1) and no slowlog entry was created. Replaced with a
+   pipelined SET of 100000 keys (100-byte values) and a ~200 ms Lua busy loop (`for i=1,150000000`).
+   (A Lua loop on redis.call("TIME") was tried first: TIME is frozen inside a script, so it ran 5 s. Not used.)
+7. 10-standalone: redis-benchmark progress lines used \r; output is now filtered to the final "requests per second" lines.
+8. 20-sentinel: fixed `sleep 8` / `sleep 12` replaced by polling (wait_until), with the wait time printed:
+   after SENTINEL FAILOVER, rs1 was still master with 0 replicas and had no CONFIG REWRITE block 8 s later;
+   after unpause, the old master's link was still down at 12 s.
+9. 20-sentinel: master() always asked rs3's Sentinel; when rs3 was the paused master it returned nothing
+   and the rest of test 2 ran against an empty node name. Now asks any Sentinel that responds.
+10. 20-sentinel test 2: after the new master is elected, the script now waits until
+   min_slaves_good_slaves >= 1 and writes again. In one earlier run the first write after failover
+   returned "NOREPLICAS Not enough good replicas to write" (min-replicas-to-write 1, replica still
+   reconfiguring); in the final run the first write succeeded straight away.
+
+Config problems
+- None. Redis and Sentinel accepted all three redis-*.conf files and sentinel.conf, no startup errors.
+- Observation only (no change made): redis-cluster.conf `databases 16` -> on every cluster node Redis logs
+  "# WARNING: Changing databases number from 16 to 1 since we are in cluster mode" and CONFIG GET databases = 1.
+  The comment in the file says the value has no effect; it does cause this WARNING line.
+
+Not verified
+- Only on Docker Desktop (arm64, linuxkit kernel, 10 CPU / 7.7 GiB), not on a 16 GB / 8 vCPU host.
+  maxmemory 10gb is larger than the VM RAM; no memory-pressure test was done.
+- THP shows [always] in the container (host VM setting); disable-thp only affects the Redis process, not checked further.
+- sysctl values are applied inside privileged containers to the shared VM kernel, not per host.
+- redis-benchmark numbers are container-internal only.
+
+== Follow-up run (2026-10-24 14:39-14:41 Asia/Taipei) ==
+conf/redis-cluster.conf now has `databases 1`; 40-extra.sh added. No script changes were needed this time.
+
+30-cluster.sh (re-run): PASS
+- No "Changing databases number" WARNING on any of rc1-rc6 ("(no warnings)" x6); cmpconf on rc1: 0 DIFF.
+- docker pause rc1: rc5 promoted, observed after 8 s (pause 06:39:41 UTC; election delayed 812 ms,
+  won 06:39:49.8). rc1 rejoined as replica. CLUSTER FAILOVER on rc1: done within the same second
+  (one "Waiting for votes, but majority still not reached" line, then success 7 ms later).
+- pause rc2 + rc6: cluster_state:fail / CLUSTERDOWN; after unpause ok. rc6 again ended up master of that shard.
+
+40-extra.sh: PASS (all three)
+(a) `port 6390   # 預設` -> "*** FATAL CONFIG FILE ERROR (Redis 7.4.11) *** ... wrong number of arguments", exit=1.
+(b) dump.rdb with 1000 keys started with appendonly yes -> dbsize 0 (log shows only "Creating AOF base/incr
+    file ... on server start", no "DB loaded"). Correct procedure (appendonly no -> CONFIG SET appendonly yes
+    -> restart with appendonly yes) -> dbsize 1000, "DB loaded from base file appendonly.aof.1.base.rdb".
+(c) 8.10.2 core built (rc=0). With --cluster-enabled yes, 8.10.2 logs
+    "WARNING: the cluster bus port is not authenticated: 'tls-cluster' is disabled and protected mode was waived
+    with 'cluster-bus-port-protected-mode no' ..."; 7.4.11 does not. CONFIG GET cluster-bus-port-protected-mode
+    on 8.10.2 = no (default in that test, no config file). Both versions also print the databases 16->1 WARNING
+    because this test starts without a config file (default databases 16).

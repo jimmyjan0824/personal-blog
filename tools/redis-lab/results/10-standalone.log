@@ -1,0 +1,233 @@
+
+======== 環境 ========  (2026-10-24 14:27:36)
+[redis1]# cat /etc/rocky-release; uname -m; nproc; free -g | head -2
+Rocky Linux release 9.3 (Blue Onyx)
+aarch64
+10
+               total        used        free      shared  buff/cache   available
+Mem:               7           0           5           0           1           6
+
+
+======== 步驟 0：OS 參數 ========  (2026-10-24 14:27:36)
+[redis1]# cat /proc/sys/vm/overcommit_memory /proc/sys/net/core/somaxconn /sys/kernel/mm/transparent_hugepage/enabled
+1
+4096
+[always] madvise never
+
+[redis1]# mkdir -p /etc/sysctl.d && cp /root/conf/99-redis.conf /etc/sysctl.d/99-redis.conf && sysctl -p /etc/sysctl.d/99-redis.conf
+vm.overcommit_memory = 1
+net.core.somaxconn = 1024
+vm.swappiness = 1
+
+
+======== 步驟 1：安裝編譯工具並編譯安裝 ========  (2026-10-24 14:27:37)
+[redis1]# dnf install -y gcc make tar gzip systemd-devel 2>&1 | grep -E "^Install|^Upgrade|Complete|gcc  |systemd-devel" | head
+Installing:
+ gcc                     aarch64  11.5.0-14.el9                appstream   30 M
+ systemd-devel           aarch64  252-67.el9_8.6.rocky.0.1     appstream  465 k
+ libgcc                  aarch64  11.5.0-14.el9                baseos      79 k
+Installing dependencies:
+Install  14 Packages
+Upgrade   7 Packages
+(13/21): systemd-devel-252-67.el9_8.6.rocky.0.1 1.6 MB/s | 465 kB     00:00    
+  Installing       : systemd-devel-252-67.el9_8.6.rocky.0.1.aarch64       21/28 
+  Verifying        : systemd-devel-252-67.el9_8.6.rocky.0.1.aarch64       14/28 
+
+[redis1]# cd /usr/local/src && curl -fsSLO https://download.redis.io/releases/redis-7.4.11.tar.gz && ls -l redis-7.4.11.tar.gz && sha256sum redis-7.4.11.tar.gz
+-rw-r--r-- 1 root root 3550434 Oct 24 06:28 redis-7.4.11.tar.gz
+3c266ece0abd54ed3b1c912c6eb86b7508cf382cb690ee6649d3843f018f6357  redis-7.4.11.tar.gz
+
+[redis1]# curl -fsSL https://raw.githubusercontent.com/redis/redis-hashes/master/README | grep "redis-7.4.11.tar.gz"
+hash redis-7.4.11.tar.gz sha256 3c266ece0abd54ed3b1c912c6eb86b7508cf382cb690ee6649d3843f018f6357 http://download.redis.io/releases/redis-7.4.11.tar.gz
+
+[redis1]# cd /usr/local/src && tar xzf redis-7.4.11.tar.gz && cd redis-7.4.11 && (time make -j"$(nproc)" USE_SYSTEMD=yes) 2>&1 | tail -8
+
+Hint: It's a good idea to run 'make test' ;)
+
+make[1]: Leaving directory '/usr/local/src/redis-7.4.11/src'
+
+real	0m15.709s
+user	1m38.695s
+sys	0m8.455s
+
+[redis1]# cd /usr/local/src/redis-7.4.11 && make install 2>&1 | tail -8
+    [34mCC[0m [33mMakefile.dep[0m
+
+Hint: It's a good idea to run 'make test' ;)
+
+    [34;1mINSTALL[0m [37;1mredis-server[0m
+    [34;1mINSTALL[0m [37;1mredis-benchmark[0m
+    [34;1mINSTALL[0m [37;1mredis-cli[0m
+make[1]: Leaving directory '/usr/local/src/redis-7.4.11/src'
+
+[redis1]# ls /usr/local/bin/redis-*; redis-server --version; ldd /usr/local/bin/redis-server | grep systemd
+/usr/local/bin/redis-benchmark
+/usr/local/bin/redis-check-aof
+/usr/local/bin/redis-check-rdb
+/usr/local/bin/redis-cli
+/usr/local/bin/redis-sentinel
+/usr/local/bin/redis-server
+Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=7976ce91a6632ff3
+	libsystemd.so.0 => /lib64/libsystemd.so.0 (0x0000ffff8a0ed000)
+
+
+======== 預設值：不帶設定檔啟動 7.4.11，匯出 CONFIG GET * ========  (2026-10-24 14:28:23)
+[redis1]# redis-server --port 7777 --daemonize yes --logfile /tmp/def.log >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 7777 config get "*" | paste - - | sort > /tmp/defaults-7.4.11.txt; env -u REDISCLI_AUTH redis-cli -p 7777 shutdown nosave; wc -l /tmp/defaults-7.4.11.txt
+202 /tmp/defaults-7.4.11.txt
+
+
+======== 對照：編譯 8.10.2（不安裝），匯出預設值 ========  (2026-10-24 14:28:24)
+[redis1]# cd /usr/local/src && curl -fsSLO https://download.redis.io/releases/redis-8.10.2.tar.gz && tar xzf redis-8.10.2.tar.gz && cd redis-8.10.2 && make -j"$(nproc)" USE_SYSTEMD=yes build redis >/tmp/make810.log 2>&1; echo rc=$?; tail -3 /tmp/make810.log; src/redis-server --version
+rc=0
+
+==> Build complete.
+    redis-server: /usr/local/src/redis-8.10.2/src/redis-server
+Redis server v=8.10.2 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=ddb72b12f50c16d0
+
+[redis1]# /usr/local/src/redis-8.10.2/src/redis-server --port 7778 --daemonize yes --logfile /tmp/def8.log >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 7778 config get "*" | paste - - | sort > /tmp/defaults-8.10.2.txt; env -u REDISCLI_AUTH redis-cli -p 7778 shutdown nosave; wc -l /tmp/defaults-8.10.2.txt
+228 /tmp/defaults-8.10.2.txt
+
+
+======== 步驟 2：使用者與目錄 ========  (2026-10-24 14:29:03)
+[redis1]# groupadd -r redis && useradd -r -g redis -s /sbin/nologin -d /var/lib/redis -c "Redis Server" redis && id redis
+uid=998(redis) gid=998(redis) groups=998(redis)
+
+[redis1]# mkdir -p /etc/redis /var/lib/redis /var/log/redis && chown -R redis:redis /etc/redis /var/lib/redis /var/log/redis && chmod 750 /etc/redis /var/lib/redis /var/log/redis
+
+
+======== 步驟 3：設定檔 ========  (2026-10-24 14:29:03)
+[redis1]# install -o redis -g redis -m 640 /root/conf/redis-standalone.conf /etc/redis/redis.conf && grep -Ev "^\s*(#|$)" /etc/redis/redis.conf | wc -l
+92
+
+
+======== 步驟 4：systemd ========  (2026-10-24 14:29:03)
+[redis1]# cp /root/conf/redis.service /etc/systemd/system/redis.service && systemctl daemon-reload && systemctl enable --now redis
+Created symlink /etc/systemd/system/multi-user.target.wants/redis.service → /etc/systemd/system/redis.service.
+
+[redis1]# systemctl status redis --no-pager | head -9
+● redis.service - Redis 7.4 (port 6379)
+     Loaded: loaded (/etc/systemd/system/redis.service; enabled; preset: disabled)
+     Active: active (running) since Sat 2026-10-24 06:29:03 UTC; 76ms ago
+       Docs: https://redis.io/docs/
+   Main PID: 11839 (redis-server)
+     Status: "Ready to accept connections"
+      Tasks: 9 (limit: 51007)
+     Memory: 9.3M (peak: 9.3M)
+        CPU: 4ms
+
+[redis1]# cat /var/log/redis/redis.log
+11839:C 24 Oct 2026 06:29:03.778 * Supervised by systemd. Please make sure you set appropriate values for TimeoutStartSec and TimeoutStopSec in your service unit.
+11839:C 24 Oct 2026 06:29:03.778 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+11839:C 24 Oct 2026 06:29:03.778 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=11839, just started
+11839:C 24 Oct 2026 06:29:03.778 * Configuration loaded
+11839:M 24 Oct 2026 06:29:03.779 * monotonic clock: POSIX clock_gettime
+11839:M 24 Oct 2026 06:29:03.779 * Running mode=standalone, port=6379.
+11839:M 24 Oct 2026 06:29:03.779 * Server initialized
+11839:M 24 Oct 2026 06:29:03.781 * Creating AOF base file appendonly.aof.1.base.rdb on server start
+11839:M 24 Oct 2026 06:29:03.782 * Creating AOF incr file appendonly.aof.1.incr.aof on server start
+11839:M 24 Oct 2026 06:29:03.782 * Ready to accept connections tcp
+
+
+======== 步驟 5：驗證 ========  (2026-10-24 14:29:03)
+[redis1]# redis-cli ping; redis-cli info server | grep -E "redis_version|redis_mode|os:|arch_bits|multiplexing_api|gcc_version|process_supervised|config_file|io_threads_active"
+PONG
+redis_version:7.4.11
+redis_mode:standalone
+os:Linux 7.0.14-linuxkit aarch64
+arch_bits:64
+multiplexing_api:epoll
+gcc_version:11.5.0
+process_supervised:systemd
+config_file:/etc/redis/redis.conf
+io_threads_active:0
+
+[redis1]# redis-cli config get maxmemory; redis-cli config get maxmemory-policy; redis-cli config get io-threads; redis-cli config get appendonly; redis-cli config get lazyfree-lazy-user-del
+maxmemory
+10737418240
+maxmemory-policy
+allkeys-lru
+io-threads
+4
+appendonly
+yes
+lazyfree-lazy-user-del
+yes
+
+[redis1]# cat /proc/$(pidof redis-server)/limits | grep "open files"; redis-cli config get maxclients
+Max open files            65535                65535                files     
+maxclients
+10000
+
+
+======== 設定檔 vs 實際值比對（只印出不同的） ========  (2026-10-24 14:29:04)
+save: 3600 1 300 100 60 10000
+client-output-buffer-limit: normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60
+bind: 192.168.58.11 127.0.0.1 -::1
+compare done
+[redis1]# env -u REDISCLI_AUTH redis-cli ping; redis-cli -h 192.168.58.11 ping
+NOAUTH Authentication required.
+
+PONG
+
+[redis1]# redis-cli set user:1001:name Jimmy EX 3600; redis-cli get user:1001:name; seq 1 100000 | awk "{printf \"SET key:%d %0100d\\n\", \$1, \$1}" | redis-cli >/dev/null; redis-cli dbsize; redis-cli info memory | grep -E "used_memory_human|maxmemory_human|maxmemory_policy|mem_fragmentation_ratio|mem_allocator"
+OK
+Jimmy
+100001
+used_memory_human:18.16M
+maxmemory_human:10.00G
+maxmemory_policy:allkeys-lru
+mem_fragmentation_ratio:1.58
+mem_allocator:jemalloc-5.3.0
+
+[redis1]# redis-cli info persistence | grep -E "aof_enabled|aof_rewrite_in_progress|rdb_last_bgsave_status|aof_last_write_status"; ls -l /var/lib/redis /var/lib/redis/appendonlydir
+rdb_last_bgsave_status:ok
+aof_enabled:1
+aof_rewrite_in_progress:0
+aof_last_write_status:ok
+/var/lib/redis:
+total 4
+drwx------ 2 redis redis 4096 Oct 24 06:29 appendonlydir
+
+/var/lib/redis/appendonlydir:
+total 13280
+-rw------- 1 redis redis       89 Oct 24 06:29 appendonly.aof.1.base.rdb
+-rw------- 1 redis redis 13588994 Oct 24 06:29 appendonly.aof.1.incr.aof
+-rw------- 1 redis redis       88 Oct 24 06:29 appendonly.aof.manifest
+
+
+======== 重啟後資料仍在（AOF） ========  (2026-10-24 14:29:08)
+[redis1]# systemctl restart redis && sleep 2 && redis-cli dbsize && redis-cli get user:1001:name && grep -E "DB loaded|Ready to accept" /var/log/redis/redis.log | tail -3
+100001
+Jimmy
+12296:M 24 Oct 2026 06:29:08.784 * DB loaded from incr file appendonly.aof.1.incr.aof: 0.039 seconds
+12296:M 24 Oct 2026 06:29:08.784 * DB loaded from append only file: 0.039 seconds
+12296:M 24 Oct 2026 06:29:08.784 * Ready to accept connections tcp
+
+
+======== 慢查詢與延遲監控 ========  (2026-10-24 14:29:10)
+[redis1]# redis-cli eval "for i=1,150000000 do end return 1" 0; redis-cli latency latest; redis-cli slowlog get 1
+1
+command
+1792823351
+201
+201
+0
+1792823351
+201106
+eval
+for i=1,150000000 do end return 1
+0
+127.0.0.1:39498
+
+
+
+======== 錯誤日誌中的 WARNING ========  (2026-10-24 14:29:11)
+[redis1]# grep -E "WARNING|# " /var/log/redis/redis.log || echo "(no warnings)"
+11839:M 24 Oct 2026 06:29:08.734 # Redis is now ready to exit, bye bye...
+
+
+======== redis-benchmark（容器內，僅確認服務正常，不代表正式主機效能） ========  (2026-10-24 14:29:11)
+[redis1]# redis-benchmark -h 127.0.0.1 -a ChangeMe_Redis_2026 -q -n 100000 -c 50 -t set,get --threads 2 2>&1 | tr "\\r" "\\n" | grep "requests per second"
+SET: 199203.20 requests per second, p50=0.119 msec
+GET: 199600.80 requests per second, p50=0.095 msec
+

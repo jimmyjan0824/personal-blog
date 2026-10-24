@@ -1,0 +1,33 @@
+# redis1：Standalone；rs1~rs3：Sentinel（每台 Redis + Sentinel）；rc1~rc6：Cluster（3 主 3 從）
+x-node: &node
+  image: rocky9-redis74
+  pull_policy: never
+  privileged: true            # systemd 當 PID 1、sysctl 需要
+  cgroup: host
+  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro"]
+  tmpfs: ["/run", "/run/lock"]
+  extra_hosts:
+    - "redis1:192.168.58.11"
+    - "rs1:192.168.58.21"
+    - "rs2:192.168.58.22"
+    - "rs3:192.168.58.23"
+    - "rc1:192.168.58.31"
+    - "rc2:192.168.58.32"
+    - "rc3:192.168.58.33"
+    - "rc4:192.168.58.34"
+    - "rc5:192.168.58.35"
+    - "rc6:192.168.58.36"
+services:
+  redis1: { <<: *node, image: rocky9-base, hostname: redis1, networks: { labnet: { ipv4_address: 192.168.58.11 } } }
+  rs1:    { <<: *node, hostname: rs1, networks: { labnet: { ipv4_address: 192.168.58.21 } } }
+  rs2:    { <<: *node, hostname: rs2, networks: { labnet: { ipv4_address: 192.168.58.22 } } }
+  rs3:    { <<: *node, hostname: rs3, networks: { labnet: { ipv4_address: 192.168.58.23 } } }
+  rc1:    { <<: *node, hostname: rc1, networks: { labnet: { ipv4_address: 192.168.58.31 } } }
+  rc2:    { <<: *node, hostname: rc2, networks: { labnet: { ipv4_address: 192.168.58.32 } } }
+  rc3:    { <<: *node, hostname: rc3, networks: { labnet: { ipv4_address: 192.168.58.33 } } }
+  rc4:    { <<: *node, hostname: rc4, networks: { labnet: { ipv4_address: 192.168.58.34 } } }
+  rc5:    { <<: *node, hostname: rc5, networks: { labnet: { ipv4_address: 192.168.58.35 } } }
+  rc6:    { <<: *node, hostname: rc6, networks: { labnet: { ipv4_address: 192.168.58.36 } } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 192.168.58.0/24 } ] }

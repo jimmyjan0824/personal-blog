@@ -1,0 +1,23 @@
+# /etc/systemd/system/redis-sentinel.service
+[Unit]
+Description=Redis Sentinel 7.4 (port 26379)
+Documentation=https://redis.io/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/redis-sentinel /etc/redis/sentinel.conf
+User=redis
+Group=redis
+RuntimeDirectory=redis-sentinel
+RuntimeDirectoryMode=0755
+UMask=0077
+LimitNOFILE=65535
+TimeoutStartSec=infinity
+TimeoutStopSec=infinity
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

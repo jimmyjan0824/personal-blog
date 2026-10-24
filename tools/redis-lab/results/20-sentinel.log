@@ -1,0 +1,341 @@
+
+======== 環境 ========  (2026-10-24 14:33:56)
+[rs1]# cat /etc/rocky-release; redis-server --version
+Rocky Linux release 9.3 (Blue Onyx)
+Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=b6219fdaf4deedf5
+
+
+======== 步驟 0~2：OS 參數、使用者與目錄（三台都做） ========  (2026-10-24 14:33:57)
+[rs1]# mkdir -p /etc/sysctl.d && cp /root/conf/99-redis.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-redis.conf >/dev/null && groupadd -r redis && useradd -r -g redis -s /sbin/nologin -d /var/lib/redis redis && mkdir -p /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && chown -R redis:redis /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && chmod 750 /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && echo ok
+ok
+
+[rs2]# mkdir -p /etc/sysctl.d && cp /root/conf/99-redis.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-redis.conf >/dev/null && groupadd -r redis && useradd -r -g redis -s /sbin/nologin -d /var/lib/redis redis && mkdir -p /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && chown -R redis:redis /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && chmod 750 /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && echo ok
+ok
+
+[rs3]# mkdir -p /etc/sysctl.d && cp /root/conf/99-redis.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-redis.conf >/dev/null && groupadd -r redis && useradd -r -g redis -s /sbin/nologin -d /var/lib/redis redis && mkdir -p /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && chown -R redis:redis /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && chmod 750 /etc/redis /var/lib/redis /var/lib/redis-sentinel /var/log/redis && echo ok
+ok
+
+
+======== 步驟 3：redis.conf（三台），rs2 / rs3 加上 replicaof ========  (2026-10-24 14:33:57)
+[rs1]# install -o redis -g redis -m 640 /root/conf/redis-sentinel.conf /etc/redis/redis.conf && sed -i 's/^bind 192.168.58.21 /bind 192.168.58.21 /' /etc/redis/redis.conf && grep '^bind' /etc/redis/redis.conf
+bind 192.168.58.21 127.0.0.1 -::1
+
+[rs2]# install -o redis -g redis -m 640 /root/conf/redis-sentinel.conf /etc/redis/redis.conf && sed -i 's/^bind 192.168.58.21 /bind 192.168.58.22 /' /etc/redis/redis.conf && grep '^bind' /etc/redis/redis.conf
+bind 192.168.58.22 127.0.0.1 -::1
+
+[rs3]# install -o redis -g redis -m 640 /root/conf/redis-sentinel.conf /etc/redis/redis.conf && sed -i 's/^bind 192.168.58.21 /bind 192.168.58.23 /' /etc/redis/redis.conf && grep '^bind' /etc/redis/redis.conf
+bind 192.168.58.23 127.0.0.1 -::1
+
+[rs2]# echo 'replicaof 192.168.58.21 6379' >> /etc/redis/redis.conf && tail -1 /etc/redis/redis.conf
+replicaof 192.168.58.21 6379
+
+[rs3]# echo 'replicaof 192.168.58.21 6379' >> /etc/redis/redis.conf && tail -1 /etc/redis/redis.conf
+replicaof 192.168.58.21 6379
+
+
+======== 步驟 4：啟動 Redis（先主後從） ========  (2026-10-24 14:33:57)
+[rs1]# cp /root/conf/redis.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis && systemctl is-active redis
+Created symlink /etc/systemd/system/multi-user.target.wants/redis.service → /etc/systemd/system/redis.service.
+active
+
+[rs2]# cp /root/conf/redis.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis && systemctl is-active redis
+Created symlink /etc/systemd/system/multi-user.target.wants/redis.service → /etc/systemd/system/redis.service.
+active
+
+[rs3]# cp /root/conf/redis.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis && systemctl is-active redis
+Created symlink /etc/systemd/system/multi-user.target.wants/redis.service → /etc/systemd/system/redis.service.
+active
+
+[rs1]# redis-cli info replication
+# Replication
+role:master
+connected_slaves:2
+min_slaves_good_slaves:2
+slave0:ip=192.168.58.22,port=6379,state=online,offset=0,lag=0
+slave1:ip=192.168.58.23,port=6379,state=online,offset=0,lag=1
+master_failover_state:no-failover
+master_replid:cdf63b448c4c8b4d90187de83bd415e427af3f47
+master_replid2:0000000000000000000000000000000000000000
+master_repl_offset:0
+second_repl_offset:-1
+repl_backlog_active:1
+repl_backlog_size:268435456
+repl_backlog_first_byte_offset:1
+repl_backlog_histlen:0
+
+[rs2]# redis-cli info replication | head -12
+# Replication
+role:slave
+master_host:192.168.58.21
+master_port:6379
+master_link_status:up
+master_last_io_seconds_ago:3
+master_sync_in_progress:0
+slave_read_repl_offset:0
+slave_repl_offset:0
+slave_priority:100
+slave_read_only:1
+replica_announced:1
+
+[rs1]# grep -E "Replica .* asks|Synchronization with replica|Starting BGSAVE|diskless|succeeded" /var/log/redis/redis.log
+102:M 24 Oct 2026 06:33:57.997 * Replica 192.168.58.22:6379 asks for synchronization
+102:M 24 Oct 2026 06:33:57.998 * Delay next BGSAVE for diskless SYNC
+102:M 24 Oct 2026 06:33:58.139 * Replica 192.168.58.23:6379 asks for synchronization
+102:M 24 Oct 2026 06:33:58.139 * Delay next BGSAVE for diskless SYNC
+102:M 24 Oct 2026 06:33:58.919 * Starting BGSAVE for SYNC with target: replicas sockets
+102:M 24 Oct 2026 06:33:58.927 * Streamed RDB transfer with replica 192.168.58.22:6379 succeeded (socket). Waiting for REPLCONF ACK from replica to enable streaming
+102:M 24 Oct 2026 06:33:58.927 * Synchronization with replica 192.168.58.22:6379 succeeded
+102:M 24 Oct 2026 06:33:58.927 * Streamed RDB transfer with replica 192.168.58.23:6379 succeeded (socket). Waiting for REPLCONF ACK from replica to enable streaming
+102:M 24 Oct 2026 06:33:58.927 * Synchronization with replica 192.168.58.23:6379 succeeded
+
+[rs2]# grep -E "MASTER <-> REPLICA|Connecting to MASTER|Loading|Finished|Successful" /var/log/redis/redis.log
+100:S 24 Oct 2026 06:33:57.997 * Connecting to MASTER 192.168.58.21:6379
+100:S 24 Oct 2026 06:33:57.997 * MASTER <-> REPLICA sync started
+100:S 24 Oct 2026 06:33:58.921 * MASTER <-> REPLICA sync: receiving streamed RDB from master with EOF to disk
+100:S 24 Oct 2026 06:33:58.921 * MASTER <-> REPLICA sync: Flushing old data
+100:S 24 Oct 2026 06:33:58.922 * MASTER <-> REPLICA sync: Loading DB in memory
+100:S 24 Oct 2026 06:33:58.926 * Loading RDB produced by version 7.4.11
+100:S 24 Oct 2026 06:33:58.926 * MASTER <-> REPLICA sync: Finished with success
+111:C 24 Oct 2026 06:33:58.929 * Successfully created the temporary AOF base file temp-rewriteaof-bg-111.aof
+100:S 24 Oct 2026 06:33:58.952 * Successfully renamed the temporary AOF base file temp-rewriteaof-bg-111.aof into appendonly.aof.2.base.rdb
+100:S 24 Oct 2026 06:33:58.952 * Successfully renamed the temporary AOF incr file temp-appendonly.aof.incr into appendonly.aof.2.incr.aof
+
+save: 3600 1 300 100 60 10000
+client-output-buffer-limit: normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60
+bind: 192.168.58.21 127.0.0.1 -::1
+compare done
+
+======== 步驟 5：sentinel.conf 與啟動 Sentinel（三台） ========  (2026-10-24 14:34:01)
+[rs1]# install -o redis -g redis -m 640 /root/conf/sentinel.conf /etc/redis/sentinel.conf && sed -i 's/^bind 192.168.58.21 /bind 192.168.58.21 /' /etc/redis/sentinel.conf && cp /root/conf/redis-sentinel.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis-sentinel && systemctl is-active redis-sentinel
+Created symlink /etc/systemd/system/multi-user.target.wants/redis-sentinel.service → /etc/systemd/system/redis-sentinel.service.
+active
+
+[rs2]# install -o redis -g redis -m 640 /root/conf/sentinel.conf /etc/redis/sentinel.conf && sed -i 's/^bind 192.168.58.21 /bind 192.168.58.22 /' /etc/redis/sentinel.conf && cp /root/conf/redis-sentinel.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis-sentinel && systemctl is-active redis-sentinel
+Created symlink /etc/systemd/system/multi-user.target.wants/redis-sentinel.service → /etc/systemd/system/redis-sentinel.service.
+active
+
+[rs3]# install -o redis -g redis -m 640 /root/conf/sentinel.conf /etc/redis/sentinel.conf && sed -i 's/^bind 192.168.58.21 /bind 192.168.58.23 /' /etc/redis/sentinel.conf && cp /root/conf/redis-sentinel.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis-sentinel && systemctl is-active redis-sentinel
+Created symlink /etc/systemd/system/multi-user.target.wants/redis-sentinel.service → /etc/systemd/system/redis-sentinel.service.
+active
+
+[rs1]# cat /var/log/redis/sentinel.log
+568:X 24 Oct 2026 06:34:01.819 * Supervised by systemd. Please make sure you set appropriate values for TimeoutStartSec and TimeoutStopSec in your service unit.
+568:X 24 Oct 2026 06:34:01.819 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+568:X 24 Oct 2026 06:34:01.819 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=568, just started
+568:X 24 Oct 2026 06:34:01.819 * Configuration loaded
+568:X 24 Oct 2026 06:34:01.819 * monotonic clock: POSIX clock_gettime
+568:X 24 Oct 2026 06:34:01.819 * Running mode=sentinel, port=26379.
+568:X 24 Oct 2026 06:34:01.822 * Sentinel new configuration saved on disk
+568:X 24 Oct 2026 06:34:01.822 * Sentinel ID is 1349725475cd7926088d6d19ab0e272c418977dd
+568:X 24 Oct 2026 06:34:01.822 # +monitor master mymaster 192.168.58.21 6379 quorum 2
+568:X 24 Oct 2026 06:34:01.822 * +slave slave 192.168.58.22:6379 192.168.58.22 6379 @ mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:01.823 * Sentinel new configuration saved on disk
+568:X 24 Oct 2026 06:34:01.823 * +slave slave 192.168.58.23:6379 192.168.58.23 6379 @ mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:01.824 * Sentinel new configuration saved on disk
+568:X 24 Oct 2026 06:34:03.998 * +sentinel sentinel 4a7f0e091c8df65b80caa790feaa7b123a3f7843 192.168.58.22 26379 @ mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:04.003 * Sentinel new configuration saved on disk
+568:X 24 Oct 2026 06:34:04.141 * +sentinel sentinel 8156995db85c04866e04249c62f9bb75f9a0e26f 192.168.58.23 26379 @ mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:04.144 * Sentinel new configuration saved on disk
+
+[rs1]# redis-cli -p 26379 sentinel get-master-addr-by-name mymaster
+192.168.58.21
+6379
+
+[rs1]# redis-cli -p 26379 sentinel master mymaster | paste - - | grep -E "^(name|ip|port|flags|num-slaves|num-other-sentinels|quorum|down-after-milliseconds|failover-timeout|parallel-syncs)\s"
+name	mymaster
+ip	192.168.58.21
+port	6379
+flags	master
+down-after-milliseconds	5000
+num-slaves	2
+num-other-sentinels	2
+quorum	2
+failover-timeout	60000
+parallel-syncs	1
+
+[rs1]# redis-cli -p 26379 sentinel replicas mymaster | paste - - | grep -E "^(name|flags|master-link-status|slave-priority)\s"
+name	192.168.58.23:6379
+flags	slave
+master-link-status	ok
+slave-priority	100
+name	192.168.58.22:6379
+flags	slave
+master-link-status	ok
+slave-priority	100
+
+[rs1]# redis-cli -p 26379 sentinel ckquorum mymaster
+OK 3 usable Sentinels. Quorum and failover authorization can be reached
+
+[rs1]# redis-cli -p 26379 info sentinel
+# Sentinel
+sentinel_masters:1
+sentinel_tilt:0
+sentinel_tilt_since_seconds:-1
+sentinel_running_scripts:0
+sentinel_scripts_queue_length:0
+sentinel_simulate_failure_flags:0
+master0:name=mymaster,status=ok,address=192.168.58.21:6379,slaves=2,sentinels=3
+
+[rs1]# tail -12 /etc/redis/sentinel.conf
+sentinel myid 1349725475cd7926088d6d19ab0e272c418977dd
+sentinel config-epoch mymaster 0
+sentinel leader-epoch mymaster 0
+sentinel current-epoch 0
+
+sentinel known-replica mymaster 192.168.58.23 6379
+
+sentinel known-replica mymaster 192.168.58.22 6379
+
+sentinel known-sentinel mymaster 192.168.58.23 26379 8156995db85c04866e04249c62f9bb75f9a0e26f
+
+sentinel known-sentinel mymaster 192.168.58.22 26379 4a7f0e091c8df65b80caa790feaa7b123a3f7843
+
+
+======== Sentinel 預設值（另起一個只設 monitor 的 Sentinel 查詢） ========  (2026-10-24 14:34:14)
+[rs1]# printf "port 26399\nsentinel monitor m 127.0.0.1 6379 1\n" > /tmp/s.conf; redis-sentinel /tmp/s.conf --daemonize yes --logfile /tmp/s.log; sleep 1; redis-cli -p 26399 sentinel config get "*" | paste - -; redis-cli -p 26399 sentinel master m | paste - - | grep -E "^(down-after-milliseconds|failover-timeout|parallel-syncs|quorum)\s"; redis-cli -p 26399 shutdown nosave
+resolve-hostnames	no
+announce-hostnames	no
+announce-ip	
+announce-port	0
+sentinel-user	
+sentinel-pass	
+loglevel	notice
+down-after-milliseconds	30000
+quorum	1
+failover-timeout	180000
+parallel-syncs	1
+
+
+======== 資料寫入與讀取 ========  (2026-10-24 14:34:15)
+[rs1]# redis-cli set order:1 "keyboard" && redis-cli incr counter:orders
+OK
+1
+
+[rs3]# redis-cli get order:1; redis-cli set should:fail 1
+keyboard
+READONLY You can't write against a read only replica.
+
+
+
+======== 測試 1：計畫內切換 SENTINEL FAILOVER ========  (2026-10-24 14:34:15)
+[rs1]# redis-cli -p 26379 sentinel failover mymaster
+OK
+
+14:34:33 [rs1] 條件成立：redis-cli info replication | grep -q "^master_link_status:up"（等了 17 秒）
+[rs1]# redis-cli -p 26379 sentinel get-master-addr-by-name mymaster
+192.168.58.23
+6379
+
+[rs1]# grep -E "\+(try-failover|elected-leader|selected-slave|promoted-slave|switch-master|failover-end|convert-to-slave)" /var/log/redis/sentinel.log | tail -8
+568:X 24 Oct 2026 06:34:16.060 # +try-failover master mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:16.159 # +elected-leader master mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:16.223 # +selected-slave slave 192.168.58.23:6379 192.168.58.23 6379 @ mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:17.239 # +promoted-slave slave 192.168.58.23:6379 192.168.58.23 6379 @ mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:18.339 # +failover-end master mymaster 192.168.58.21 6379
+568:X 24 Oct 2026 06:34:18.339 # +switch-master mymaster 192.168.58.21 6379 192.168.58.23 6379
+
+[rs1]# redis-cli info replication | head -5
+# Replication
+role:slave
+master_host:192.168.58.23
+master_port:6379
+master_link_status:up
+
+[rs1]# grep -n -A3 "Generated by CONFIG REWRITE" /etc/redis/redis.conf
+263:# Generated by CONFIG REWRITE
+264-replicaof 192.168.58.23 6379
+265-save 300 100
+266-save 60 10000
+
+目前主庫：192.168.58.23
+
+======== 測試 2：主庫無回應（docker pause 模擬當機 / 網路中斷） ========  (2026-10-24 14:34:33)
+[rs3]# redis-cli set before:crash 1
+OK
+
+14:34:33 docker compose pause rs3
+ Container redis-lab-rs3-1 Paused 
+14:34:40 新主庫 192.168.58.22，經過 7 秒
+[rs1]# grep -E "\+(sdown|odown|try-failover|elected-leader|selected-slave|promoted-slave|switch-master|failover-end)" /var/log/redis/sentinel.log | tail -9
+568:X 24 Oct 2026 06:34:39.000 # +sdown master mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:39.104 # +odown master mymaster 192.168.58.23 6379 #quorum 2/2
+568:X 24 Oct 2026 06:34:39.104 # +try-failover master mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:39.171 # +elected-leader master mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:39.245 # +selected-slave slave 192.168.58.22:6379 192.168.58.22 6379 @ mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:39.526 # +promoted-slave slave 192.168.58.22:6379 192.168.58.22 6379 @ mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:39.632 # +sdown sentinel 8156995db85c04866e04249c62f9bb75f9a0e26f 192.168.58.23 26379 @ mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:40.218 # +failover-end master mymaster 192.168.58.23 6379
+568:X 24 Oct 2026 06:34:40.218 # +switch-master mymaster 192.168.58.23 6379 192.168.58.22 6379
+
+[rs2]# redis-cli get before:crash; redis-cli set after:crash 1; redis-cli info replication | head -4
+1
+OK
+# Replication
+role:master
+connected_slaves:1
+min_slaves_good_slaves:1
+
+14:34:40 [rs2] 條件成立：redis-cli info replication | grep -q "^min_slaves_good_slaves:[1-9]"（等了 0 秒）
+[rs2]# redis-cli set after:crash 1; redis-cli info replication | head -4
+OK
+# Replication
+role:master
+connected_slaves:1
+min_slaves_good_slaves:1
+
+
+======== 舊主庫恢復 ========  (2026-10-24 14:34:40)
+14:34:40 docker compose unpause rs3
+ Container redis-lab-rs3-1 Unpaused 
+14:34:56 [rs3] 條件成立：redis-cli info replication | grep -q "^master_link_status:up"（等了 16 秒）
+[rs3]# redis-cli info replication | head -6; redis-cli get after:crash
+# Replication
+role:slave
+master_host:192.168.58.22
+master_port:6379
+master_link_status:up
+master_last_io_seconds_ago:1
+1
+
+[rs1]# grep -E "convert-to-slave|\-sdown" /var/log/redis/sentinel.log | tail -3
+568:X 24 Oct 2026 06:34:40.929 # -sdown sentinel 8156995db85c04866e04249c62f9bb75f9a0e26f 192.168.58.23 26379 @ mymaster 192.168.58.22 6379
+568:X 24 Oct 2026 06:34:50.947 * +convert-to-slave slave 192.168.58.23:6379 192.168.58.23 6379 @ mymaster 192.168.58.22 6379
+
+
+======== 測試 3：min-replicas-to-write——兩台從庫都停掉時主庫拒絕寫入 ========  (2026-10-24 14:34:56)
+[rs1]# systemctl stop redis
+
+[rs3]# systemctl stop redis
+
+[rs2]# redis-cli info replication | grep -E "connected_slaves|min_slaves_good_slaves"; redis-cli set x 1
+connected_slaves:0
+min_slaves_good_slaves:0
+NOREPLICAS Not enough good replicas to write.
+
+
+[rs1]# systemctl start redis
+
+[rs3]# systemctl start redis
+
+[rs2]# redis-cli info replication | grep -E "connected_slaves|min_slaves_good_slaves"; redis-cli set x 1
+connected_slaves:2
+min_slaves_good_slaves:2
+OK
+
+
+======== 最後狀態 ========  (2026-10-24 14:35:17)
+[rs1]# redis-cli -p 26379 sentinel master mymaster | paste - - | grep -E "^(ip|flags|num-slaves|num-other-sentinels)\s"
+ip	192.168.58.22
+flags	master
+num-slaves	2
+num-other-sentinels	2
+
+[rs1]# grep -E "WARNING" /var/log/redis/redis.log /var/log/redis/sentinel.log || echo "(no warnings)"
+(no warnings)
+
+[rs2]# grep -E "WARNING" /var/log/redis/redis.log /var/log/redis/sentinel.log || echo "(no warnings)"
+(no warnings)
+
+[rs3]# grep -E "WARNING" /var/log/redis/redis.log /var/log/redis/sentinel.log || echo "(no warnings)"
+(no warnings)
+
