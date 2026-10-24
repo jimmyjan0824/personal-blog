@@ -38,6 +38,7 @@ path.repo: [ "/mnt/es-snapshots" ]
 #------------------------------------------------------------------------------
 # 建議（預設 false）。啟動時把 heap 鎖在記憶體裡，不會被 swap 出去；
 # 需要 systemd 的 LimitMEMLOCK=infinity（override.conf），否則 bootstrap check 失敗、拒絕啟動
+# （多節點叢集才會；single-node 只會記一筆 WARN）
 bootstrap.memory_lock: true
 
 #------------------------------------------------------------------------------
@@ -218,8 +219,9 @@ script.cache.max_size: 3000
 #------------------------------------------------------------------------------
 # 建議（預設 true）。不會連外的環境關掉 GeoIP 資料庫自動下載，否則會持續記錄下載失敗；需要 GeoIP 時改回 true
 ingest.geoip.downloader.enabled: false
-# 預設（已棄用的內部收集）。監控改用 Elastic Agent / Metricbeat 送到另一個叢集
-xpack.monitoring.collection.enabled: false
+# 預設是 false，不要寫出來：這個參數已棄用，寫在設定檔裡每次啟動都會在 deprecation log 留下警告（實測）。
+# 監控改用 Elastic Agent / Metricbeat 送到另一個叢集
+#xpack.monitoring.collection.enabled: false
 # 預設（9.x）。叢集狀態中的秘密資訊（例如 ES|QL 外部資料來源的憑證）一律加密；
 # 金鑰的保護密碼在 keystore（cluster.state.encryption.password.*），RPM 的 auto-config 會自動產生
 cluster.state.encryption.required: true

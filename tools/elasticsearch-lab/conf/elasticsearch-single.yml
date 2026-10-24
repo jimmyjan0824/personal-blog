@@ -34,13 +34,15 @@ path.repo: [ "/mnt/es-snapshots" ]
 # 記憶體
 #------------------------------------------------------------------------------
 # 建議（預設 false）。啟動時把 heap 鎖在記憶體裡，不會被 swap 出去；
-# 需要 systemd 的 LimitMEMLOCK=infinity（override.conf），否則 bootstrap check 失敗、拒絕啟動
+# 需要 systemd 的 LimitMEMLOCK=infinity（override.conf）。discovery.type: single-node 不強制 bootstrap checks，
+# 沒鎖住只會在日誌留下 WARN、照樣啟動（實測），所以要用 GET _nodes?filter_path=**.mlockall 確認是 true
 bootstrap.memory_lock: true
 
 #------------------------------------------------------------------------------
 # 網路
 #------------------------------------------------------------------------------
-# 建議（預設 _local_ = 只聽 loopback）。綁內網 IP；綁了非 loopback 位址就進入「正式模式」，bootstrap checks 全部強制執行
+# 建議（預設 _local_ = 只聽 loopback）。綁內網 IP；綁了非 loopback 位址就進入「正式模式」；
+# 但 discovery.type: single-node 例外，bootstrap checks 只記錄 WARN、不會拒絕啟動
 network.host: 192.168.60.11
 # 建議（預設 9200-9300 = 從 9200 起找第一個可用的 port）。固定下來，避免同一台誤啟動第二個行程時悄悄綁到 9201
 http.port: 9200
@@ -191,8 +193,9 @@ script.cache.max_size: 3000
 #------------------------------------------------------------------------------
 # 建議（預設 true）。不會連外的環境關掉 GeoIP 資料庫自動下載，否則會持續記錄下載失敗；需要 GeoIP 時改回 true
 ingest.geoip.downloader.enabled: false
-# 預設（已棄用的內部收集）。監控改用 Elastic Agent / Metricbeat 送到另一個叢集
-xpack.monitoring.collection.enabled: false
+# 預設是 false，不要寫出來：這個參數已棄用，寫在設定檔裡每次啟動都會在 deprecation log 留下警告（實測）。
+# 監控改用 Elastic Agent / Metricbeat 送到另一個叢集
+#xpack.monitoring.collection.enabled: false
 # 預設（9.x）。叢集狀態中的秘密資訊（例如 ES|QL 外部資料來源的憑證）一律加密；
 # 金鑰的保護密碼在 keystore（cluster.state.encryption.password.*），RPM 的 auto-config 會自動產生
 cluster.state.encryption.required: true

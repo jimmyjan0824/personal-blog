@@ -15,4 +15,4 @@ docker compose down -v  # 清除（含快照 volume）
 輸出記錄在 `results/`。`conf/` 是文章裡的設定檔，容器內掛載在 `/root/conf`；`bin/checkconf.py` 用來比對設定檔的「預設 / 建議」標記與 `05-defaults.sh` 匯出的預設值。
 
 > Docker Hub 的 `rockylinux:9` 停在 9.3，要用 `rockylinux/rockylinux:9`。
-> 映像裡的 RPM 在 `docker build` 時就跑了 security auto-config（憑證 SAN 是建置容器的名稱），叢集節點會換成自建 CA 的憑證；只有 auto-config 憑證的節點，`lib.sh` 會改連 localhost。
+> 映像裡的 RPM 在 `docker build` 時就跑了 security auto-config（憑證 SAN 是建置容器的名稱），叢集節點會換成自建 CA 的憑證；只有 auto-config 憑證的節點，`lib.sh` 以 `localhost` 驗證憑證、用 `--connect-to` 連到節點。
