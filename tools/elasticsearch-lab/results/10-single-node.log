@@ -1,0 +1,1291 @@
+
+======== 環境 ========  (2026-10-24 21:35:59)
+[es1]# cat /etc/rocky-release; uname -m; nproc; free -m | head -2; df -h / | sed 1d
+Rocky Linux release 9.8 (Blue Onyx)
+aarch64
+10
+               total        used        free      shared  buff/cache   available
+Mem:            7934         719        6519           8         861        7214
+overlay         453G   14G  416G   4% /
+
+
+======== 步驟 0：OS 參數 ========  (2026-10-24 21:35:59)
+[es1]# cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/99-elasticsearch.conf && sysctl -p /etc/sysctl.d/99-elasticsearch.conf
+vm.max_map_count = 262144
+vm.swappiness = 1
+net.ipv4.tcp_retries2 = 5
+
+[es1]# swapon --show; free -m | grep -i swap; cat /sys/kernel/mm/transparent_hugepage/enabled
+NAME          TYPE  SIZE USED PRIO
+/var/lib/swap file 1024M   0B   -1
+Swap:           1023           0        1023
+[always] madvise never
+
+
+======== 步驟 1：安裝（Elastic 官方 RPM 套件庫） ========  (2026-10-24 21:35:59)
+[es1]# rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch && rpm -q gpg-pubkey --qf "%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n" | grep -i elastic
+gpg-pubkey-d88e42b4-64f6fad9	Elasticsearch (Elasticsearch Signing Key) <dev_ops@elasticsearch.org> public key
+
+[es1]# cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && dnf repolist --all | grep -i elastic
+elasticsearch              Elasticsearch repository for 9.x packages    disabled
+
+[es1]# dnf --enablerepo=elasticsearch list --showduplicates elasticsearch 2>/dev/null | tail -4
+elasticsearch.aarch64                   9.5.4-1                    elasticsearch
+elasticsearch.x86_64                    9.5.4-1                    elasticsearch
+elasticsearch.aarch64                   9.5.5-1                    elasticsearch
+elasticsearch.x86_64                    9.5.5-1                    elasticsearch
+
+[es1]# time dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -vE "B/s \||^\s*$"
+Last metadata expiration check: 0:00:01 ago on Sat Oct 24 13:36:39 2026.
+Dependencies resolved.
+================================================================================
+ Package              Architecture   Version         Repository            Size
+================================================================================
+Installing:
+ elasticsearch        aarch64        9.5.5-1         elasticsearch        662 M
+Transaction Summary
+================================================================================
+Install  1 Package
+Total download size: 662 M
+Installed size: 1.0 G
+Downloading Packages:
+--------------------------------------------------------------------------------
+Running transaction check
+Transaction check succeeded.
+Running transaction test
+Transaction test succeeded.
+Running transaction
+  Preparing        :                                                        1/1 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/1 
+Creating elasticsearch group... OK
+Creating elasticsearch user... OK
+  Installing       : elasticsearch-9.5.5-1.aarch64                          1/1 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/1 
+Failed to restart systemd-sysctl.service: Unit systemd-sysctl.service not found.
+--------------------------- Security autoconfiguration information ------------------------------
+Authentication and authorization are enabled.
+TLS for the transport and HTTP layers is enabled and configured.
+The generated password for the elastic built-in superuser is : updkVL3dz5pWzZrjrdY8
+If this node should join an existing cluster, you can reconfigure this with
+'/usr/share/elasticsearch/bin/elasticsearch-reconfigure-node --enrollment-token <token-here>'
+after creating an enrollment token on your existing cluster.
+You can complete the following actions at any time:
+Reset the password of the elastic built-in superuser with 
+'/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic'.
+Generate an enrollment token for Kibana instances with 
+ '/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana'.
+Generate an enrollment token for Elasticsearch nodes with 
+'/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s node'.
+-------------------------------------------------------------------------------------------------
+### NOT starting on installation, please execute the following statements to configure elasticsearch service to start automatically using systemd
+ sudo systemctl daemon-reload
+ sudo systemctl enable elasticsearch.service
+### You can start elasticsearch service by executing
+ sudo systemctl start elasticsearch.service
+/var/tmp/rpm-tmp.aDHSZ0: line 4: /usr/lib/systemd/systemd-sysctl: No such file or directory
+  Verifying        : elasticsearch-9.5.5-1.aarch64                          1/1 
+Installed:
+  elasticsearch-9.5.5-1.aarch64                                                 
+Complete!
+
+real	1m27.323s
+user	0m22.304s
+sys	0m6.400s
+
+[es1]# rpm -qi elasticsearch | grep -E "^(Name|Version|Release|Architecture|Size|Signature)"
+Name        : elasticsearch
+Version     : 9.5.5
+Release     : 1
+Architecture: aarch64
+Size        : 1063659806
+Signature   : RSA/SHA512, Thu Oct  1 02:37:39 2026, Key ID d27d666cd88e42b4
+
+[es1]# rpm -qc elasticsearch; rpm -ql elasticsearch | grep -E "^/usr/lib/(systemd|sysctl.d|tmpfiles.d)/"
+/etc/elasticsearch/elasticsearch-plugins.example.yml
+/etc/elasticsearch/elasticsearch.yml
+/etc/elasticsearch/jvm.options
+/etc/elasticsearch/log4j2.properties
+/etc/elasticsearch/role_mapping.yml
+/etc/elasticsearch/roles.yml
+/etc/elasticsearch/users
+/etc/elasticsearch/users_roles
+/etc/sysconfig/elasticsearch
+/usr/lib/sysctl.d/elasticsearch.conf
+/usr/lib/systemd/system/elasticsearch.service
+/usr/lib/sysctl.d/elasticsearch.conf
+/usr/lib/systemd/system/elasticsearch.service
+/usr/lib/tmpfiles.d/elasticsearch.conf
+
+[es1]# id elasticsearch; ls -la /etc/elasticsearch /etc/elasticsearch/certs; ls -ld /var/lib/elasticsearch /var/log/elasticsearch /usr/share/elasticsearch
+uid=998(elasticsearch) gid=998(elasticsearch) groups=998(elasticsearch)
+/etc/elasticsearch:
+total 68
+drwxr-s--- 4 root elasticsearch  4096 Oct 24 13:38 .
+drwxr-xr-x 1 root root           4096 Oct 24 13:38 ..
+drwxr-x--- 2 root elasticsearch  4096 Oct 24 13:38 certs
+-rw-rw---- 1 root elasticsearch  1042 Sep 30 22:16 elasticsearch-plugins.example.yml
+-rw-rw---- 1 root elasticsearch   675 Oct 24 13:38 elasticsearch.keystore
+-rw-rw---- 1 root elasticsearch  4048 Oct 24 13:38 elasticsearch.yml
+-rw-rw---- 1 root elasticsearch  3744 Sep 30 22:16 jvm.options
+drwxr-s--- 2 root elasticsearch  4096 Sep 30 22:51 jvm.options.d
+-rw-rw---- 1 root elasticsearch 22998 Sep 30 22:16 log4j2.properties
+-rw-rw---- 1 root elasticsearch   473 Sep 30 22:16 role_mapping.yml
+-rw-rw---- 1 root elasticsearch   197 Sep 30 22:16 roles.yml
+-rw-rw---- 1 root elasticsearch     0 Sep 30 22:16 users
+-rw-rw---- 1 root elasticsearch     0 Sep 30 22:16 users_roles
+
+/etc/elasticsearch/certs:
+total 32
+drwxr-x--- 2 root elasticsearch  4096 Oct 24 13:38 .
+drwxr-s--- 4 root elasticsearch  4096 Oct 24 13:38 ..
+-rw-rw---- 1 root elasticsearch 10045 Oct 24 13:38 http.p12
+-rw-rw---- 1 root elasticsearch  1935 Oct 24 13:38 http_ca.crt
+-rw-rw---- 1 root elasticsearch  5838 Oct 24 13:38 transport.p12
+drwxr-xr-x 7 root          root          4096 Oct 24 13:38 /usr/share/elasticsearch
+drwxr-s--- 2 elasticsearch elasticsearch 4096 Sep 30 22:51 /var/lib/elasticsearch
+drwxr-s--- 2 elasticsearch elasticsearch 4096 Sep 30 22:51 /var/log/elasticsearch
+
+[es1]# grep -Ev "^\s*(#|$)" /etc/elasticsearch/elasticsearch.yml
+path.data: /var/lib/elasticsearch
+path.logs: /var/log/elasticsearch
+xpack.security.enabled: true
+xpack.security.enrollment.enabled: true
+xpack.security.http.ssl:
+  enabled: true
+  keystore.path: certs/http.p12
+xpack.security.transport.ssl:
+  enabled: true
+  verification_mode: certificate
+  keystore.path: certs/transport.p12
+  truststore.path: certs/transport.p12
+cluster.initial_master_nodes: ["es1"]
+http.host: 0.0.0.0
+
+[es1]# /usr/share/elasticsearch/bin/elasticsearch-keystore list
+autoconfiguration.password_hash
+cluster.state.encryption.active_password_id
+cluster.state.encryption.password.autoconfigured
+keystore.seed
+xpack.security.http.ssl.keystore.secure_password
+xpack.security.transport.ssl.keystore.secure_password
+xpack.security.transport.ssl.truststore.secure_password
+
+[es1]# openssl x509 -in /etc/elasticsearch/certs/http_ca.crt -noout -subject -enddate; openssl pkcs12 -in /etc/elasticsearch/certs/http.p12 -nokeys -passin pass:$(/usr/share/elasticsearch/bin/elasticsearch-keystore show xpack.security.http.ssl.keystore.secure_password) 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName -enddate
+subject=CN=Elasticsearch security auto-configuration HTTP CA
+notAfter=Oct 23 13:38:06 2029 GMT
+No extensions in certificate
+subject=CN=Elasticsearch security auto-configuration HTTP CA
+notAfter=Oct 23 13:38:06 2029 GMT
+
+[es1]# /usr/share/elasticsearch/jdk/bin/java -version 2>&1; /usr/share/elasticsearch/bin/elasticsearch --version 2>/dev/null
+openjdk version "27" 2026-09-15
+OpenJDK Runtime Environment (build 27+35-2325)
+OpenJDK 64-Bit Server VM (build 27+35-2325, mixed mode, sharing)
+Version: 9.5.5, Build: rpm/48acba663b09e70b115dd879329141506c377890/2026-09-30T22:12:03.984586187Z, JVM: 27
+
+
+======== 步驟 2：設定檔 ========  (2026-10-24 21:38:09)
+[es1]# cp -p /etc/elasticsearch/elasticsearch.yml /etc/elasticsearch/elasticsearch.yml.rpm && install -o root -g elasticsearch -m 660 /root/conf/elasticsearch-single.yml /etc/elasticsearch/elasticsearch.yml && grep -Ev "^\s*(#|$)" /etc/elasticsearch/elasticsearch.yml | wc -l
+70
+
+[es1]# install -o root -g elasticsearch -m 660 /root/conf/heap.options /etc/elasticsearch/jvm.options.d/heap.options && install -o root -g elasticsearch -m 660 /root/conf/lab-heap.options /etc/elasticsearch/jvm.options.d/lab-heap.options && ls -l /etc/elasticsearch/jvm.options.d/
+total 8
+-rw-rw---- 1 root elasticsearch 584 Oct 24 13:38 heap.options
+-rw-rw---- 1 root elasticsearch 291 Oct 24 13:38 lab-heap.options
+
+[es1]# install -d -o elasticsearch -g elasticsearch -m 750 /mnt/es-snapshots/single && ls -ld /mnt/es-snapshots/single
+drwxr-x--- 2 elasticsearch elasticsearch 4096 Oct 24 13:38 /mnt/es-snapshots/single
+
+
+======== 實測踩坑 1：bootstrap.memory_lock: true，但 systemd 沒有 LimitMEMLOCK ========  (2026-10-24 21:38:09)
+[es1]# systemctl start elasticsearch; systemctl is-active elasticsearch
+active
+
+[es1]# journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|bootstrap check|memory' | cut -c1-500 | tail -6; grep -E 'bootstrap check|memory lock' /var/log/elasticsearch/es-single.log | cut -c1-500 | tail -4
+Oct 24 13:38:10 es1 systemd-entrypoint[467]: WARNING: Unknown module: org.apache.arrow.memory.core specified to --add-opens
+[2026-10-24T13:38:22,690][WARN ][o.e.b.BootstrapChecks    ] [es1] memory locking requested for elasticsearch process but memory is not locked; for more information see [https://www.elastic.co/docs/deploy-manage/deploy/self-managed/bootstrap-checks?version=9.5#bootstrap-checks-memory-lock]
+
+[es1]# systemctl stop elasticsearch; systemctl reset-failed elasticsearch 2>/dev/null
+
+
+======== 步驟 3：systemd override ========  (2026-10-24 21:38:55)
+[es1]# mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/override.conf && systemctl daemon-reload && systemctl cat elasticsearch | grep -Ev "^\s*(#|$)"
+[Unit]
+Description=Elasticsearch
+Documentation=https://www.elastic.co
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=notify
+NotifyAccess=all
+RuntimeDirectory=elasticsearch
+PrivateTmp=true
+Environment=ES_HOME=/usr/share/elasticsearch
+Environment=ES_PATH_CONF=/etc/elasticsearch
+Environment=PID_DIR=/run/elasticsearch
+Environment=ES_SD_NOTIFY=true
+EnvironmentFile=-/etc/sysconfig/elasticsearch
+WorkingDirectory=/usr/share/elasticsearch
+User=elasticsearch
+Group=elasticsearch
+ExecStart=/usr/share/elasticsearch/bin/systemd-entrypoint -p ${PID_DIR}/elasticsearch.pid --quiet
+StandardOutput=journal
+StandardError=inherit
+LimitNOFILE=65535
+LimitNPROC=4096
+LimitAS=infinity
+LimitFSIZE=infinity
+TimeoutStopSec=0
+KillSignal=SIGTERM
+KillMode=process
+SendSIGKILL=no
+SuccessExitStatus=143
+TimeoutStartSec=900
+[Install]
+WantedBy=multi-user.target
+[Service]
+LimitMEMLOCK=infinity
+
+
+======== 實測踩坑 2：discovery.type: single-node 又設了 cluster.initial_master_nodes ========  (2026-10-24 21:38:55)
+[es1]# cp -p /etc/elasticsearch/elasticsearch.yml /tmp/es.yml.ok && echo 'cluster.initial_master_nodes: ["es1"]' >> /etc/elasticsearch/elasticsearch.yml && tail -1 /etc/elasticsearch/elasticsearch.yml
+cluster.initial_master_nodes: ["es1"]
+
+[es1]# systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|Exception|bootstrap check|setting \[' | cut -c1-500 | tail -6; grep -A1 'fatal exception' /var/log/elasticsearch/es-single.log | grep Exception | tail -1 | cut -c1-500
+Job for elasticsearch.service failed because the control process exited with error code.
+See "systemctl status elasticsearch.service" and "journalctl -xeu elasticsearch.service" for details.
+failed
+Oct 24 13:39:11 es1 systemd-entrypoint[694]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+java.lang.IllegalArgumentException: setting [cluster.initial_master_nodes] is not allowed when [discovery.type] is set to [single-node]
+
+[es1]# cp -p /tmp/es.yml.ok /etc/elasticsearch/elasticsearch.yml; systemctl stop elasticsearch; systemctl reset-failed elasticsearch
+
+
+======== 實測踩坑 3：9.x 已移除的設定 ========  (2026-10-24 21:39:12)
+[es1]# cp -p /etc/elasticsearch/elasticsearch.yml /tmp/es.yml.ok && echo 'cluster.routing.allocation.disk.watermark.enable_for_single_data_node: true' >> /etc/elasticsearch/elasticsearch.yml && tail -1 /etc/elasticsearch/elasticsearch.yml
+cluster.routing.allocation.disk.watermark.enable_for_single_data_node: true
+
+[es1]# systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|Exception|bootstrap check|setting \[' | cut -c1-500 | tail -6; grep -A1 'fatal exception' /var/log/elasticsearch/es-single.log | grep Exception | tail -1 | cut -c1-500
+Job for elasticsearch.service failed because the control process exited with error code.
+See "systemctl status elasticsearch.service" and "journalctl -xeu elasticsearch.service" for details.
+failed
+Oct 24 13:39:11 es1 systemd-entrypoint[694]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+Oct 24 13:39:16 es1 systemd-entrypoint[836]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+java.lang.IllegalArgumentException: unknown setting [cluster.routing.allocation.disk.watermark.enable_for_single_data_node] did you mean any of [cluster.routing.allocation.disk.watermark.flood_stage.frozen, cluster.routing.allocation.disk.watermark.flood_stage]?
+
+[es1]# cp -p /tmp/es.yml.ok /etc/elasticsearch/elasticsearch.yml; systemctl stop elasticsearch; systemctl reset-failed elasticsearch
+
+
+======== 實測踩坑 4：設定名稱打錯 ========  (2026-10-24 21:39:16)
+[es1]# cp -p /etc/elasticsearch/elasticsearch.yml /tmp/es.yml.ok && echo 'indices.memory.index_buffer_sizes: 10%' >> /etc/elasticsearch/elasticsearch.yml && tail -1 /etc/elasticsearch/elasticsearch.yml
+indices.memory.index_buffer_sizes: 10%
+
+[es1]# systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|Exception|bootstrap check|setting \[' | cut -c1-500 | tail -6; grep -A1 'fatal exception' /var/log/elasticsearch/es-single.log | grep Exception | tail -1 | cut -c1-500
+Job for elasticsearch.service failed because the control process exited with error code.
+See "systemctl status elasticsearch.service" and "journalctl -xeu elasticsearch.service" for details.
+failed
+Oct 24 13:39:11 es1 systemd-entrypoint[694]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+Oct 24 13:39:16 es1 systemd-entrypoint[836]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+Oct 24 13:39:20 es1 systemd-entrypoint[968]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+java.lang.IllegalArgumentException: unknown setting [indices.memory.index_buffer_sizes] did you mean any of [indices.memory.index_buffer_size, indices.memory.max_index_buffer_size, indices.memory.min_index_buffer_size]?
+
+[es1]# cp -p /tmp/es.yml.ok /etc/elasticsearch/elasticsearch.yml; systemctl stop elasticsearch; systemctl reset-failed elasticsearch
+
+
+======== 步驟 4：啟動 ========  (2026-10-24 21:39:21)
+[es1]# time systemctl enable --now elasticsearch; systemctl status elasticsearch --no-pager | head -12
+Created symlink /etc/systemd/system/multi-user.target.wants/elasticsearch.service → /usr/lib/systemd/system/elasticsearch.service.
+
+real	0m7.549s
+user	0m0.000s
+sys	0m0.003s
+● elasticsearch.service - Elasticsearch
+     Loaded: loaded (/usr/lib/systemd/system/elasticsearch.service; enabled; preset: disabled)
+    Drop-In: /etc/systemd/system/elasticsearch.service.d
+             └─override.conf
+     Active: active (running) since Sat 2026-10-24 13:39:28 UTC; 4ms ago
+       Docs: https://www.elastic.co
+   Main PID: 1101 (server-launcher)
+      Tasks: 68 (limit: 51007)
+     Memory: 1.5G (peak: 1.5G)
+        CPU: 19.385s
+     CGroup: /docker/433a53b3a1a5e55fada58f0d98bbb028e6c30ffcf616d9c32ff67b31a5268ae0/system.slice/elasticsearch.service
+             ├─1101 /usr/share/elasticsearch/lib/tools/server-launcher/server-launcher -p /run/elasticsearch/elasticsearch.pid --quiet
+
+[es1]# grep -E 'heap size|JVM arguments|bound_addresses|publish_address|started|license|WARN|ERROR' /var/log/elasticsearch/es-single.log | cut -c1-400
+[2026-10-24T13:38:10,939][INFO ][o.e.b.Elasticsearch      ] [es1] JVM arguments [-Des.networkaddress.cache.ttl=60, -Des.networkaddress.cache.negative.ttl=10, -XX:+AlwaysPreTouch, -Xss1m, -Djava.awt.headless=true, -Dfile.encoding=UTF-8, -Djna.nosys=true, -XX:-OmitStackTraceInFastThrow, -Dio.netty.noUnsafe=true, -Dio.netty.noKeySetOptimization=true, -Dio.netty.recycler.maxCapacityPerThread=0, --add-
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] Unable to lock JVM Memory: error=12, reason=Cannot allocate memory
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] This can result in part of the JVM being swapped out.
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] Increase RLIMIT_MEMLOCK, soft limit: 8388608, hard limit: 8388608
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] These can be adjusted by modifying /etc/security/limits.conf, for example:
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] If you are logged in interactively, you will have to re-login for the new limits to take effect.
+[2026-10-24T13:38:13,337][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:38:13,952][INFO ][o.e.e.NodeEnvironment    ] [es1] heap size [1gb], compressed ordinary object pointers [true]
+[2026-10-24T13:38:15,788][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:38:15,788][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:38:15,788][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:38:22,607][INFO ][o.e.x.d.l.DeprecationIndexingComponent] [es1] deprecation component started
+[2026-10-24T13:38:22,653][INFO ][o.e.t.TransportService   ] [es1] publish_address {192.168.60.11:9300}, bound_addresses {192.168.60.11:9300}
+[2026-10-24T13:38:22,690][WARN ][o.e.b.BootstrapChecks    ] [es1] memory locking requested for elasticsearch process but memory is not locked; for more information see [https://www.elastic.co/docs/deploy-manage/deploy/self-managed/bootstrap-checks?version=9.5#bootstrap-checks-memory-lock]
+[2026-10-24T13:38:22,777][WARN ][i.o.usage                ] [es1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+[2026-10-24T13:38:22,829][INFO ][o.e.h.AbstractHttpServerTransport] [es1] publish_address {192.168.60.11:9200}, bound_addresses {192.168.60.11:9200}
+[2026-10-24T13:38:22,829][INFO ][o.e.n.Node               ] [es1] started {es1}{kJIxUfY_TDCLLhP-qJWblg}{rWCB40VxQNmf1A9NW7JDTg}{es1}{192.168.60.11}{192.168.60.11:9300}{dim}{9.5.5}{8000099-9111000}{transform.config_version=10.0.0, xpack.installed=true, ml.config_version=12.0.0}
+[2026-10-24T13:38:23,076][INFO ][o.e.x.m.p.NativeController] [es1] Native controller process has stopped - no new native processes can be started
+[2026-10-24T13:38:23,309][INFO ][o.e.x.w.AbstractLicenseCheckingWriteLoadForecaster] [es1] license state changed, now [valid]
+[2026-10-24T13:38:23,499][WARN ][o.e.x.s.s.S.SecurityMigration] [es1] Submit security migration task failed
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [reindex-data-stream-pipeline] for [stack]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [behavioral_analytics-events-final_pipeline] for [enterprise_search]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs@default-pipeline] for [stack]
+[2026-10-24T13:38:23,500][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs-apm.app@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.transaction@default-pipeline] for [apm]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs-default-pipeline] for [stack]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [ml-size-based-ilm-policy] for [ml]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [apm@pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [traces-apm@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics] for [stack]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.service_transaction@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.service_summary@default-pipeline] for [apm]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs] for [stack]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [traces-apm.rum@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.app@default-pipeline] for [apm]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [synthetics] for [stack]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs@json-message] for [stack]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.service_destination@default-pipeline] for [apm]
+[2026-10-24T13:38:23,503][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [30-days-default] for [stack]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [search-default-ingestion] for [enterprise_search]
+[2026-10-24T13:38:23,504][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [7-days-default] for [stack]
+[2026-10-24T13:38:23,503][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs@json-pipeline] for [stack]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs-apm.error@default-pipeline] for [apm]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [180-days-default] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [365-days-default] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [90-days-default] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [30-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [synthetics@lifecycle] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [7-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [365-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [90-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [watch-history-ilm-policy-16] for [watcher]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [slm-history-ilm-policy] for [index_lifecycle]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [180-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-tohost-meta-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.deprecation-indexing-ilm-policy] for [deprecation]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-actions-results-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-fromhost-data-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-tohost-data-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-fromhost-meta-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [ilm-history-ilm-policy] for [index_lifecycle]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.monitoring-8-ilm-policy] for [monitoring]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_destination_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.app_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs-apm.error_logs-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_destination_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_transaction_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces-apm.rum_traces-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces-apm.traces-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.transaction_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_summary_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_transaction_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.transaction_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces-apm.sampled_traces-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_destination_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs-apm.app_logs-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.internal_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_summary_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_summary_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_transaction_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,508][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.transaction_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:52,981][WARN ][o.e.c.NodeUsageStatsForThreadPoolsCollector] [es1] Got no usage stats from nodes [kJIxUfY_TDCLLhP-qJWblg], using last known stats for them
+[2026-10-24T13:38:52,980][WARN ][o.e.c.InternalClusterInfoService] [es1] failed to retrieve stats for node [kJIxUfY_TDCLLhP-qJWblg]
+[2026-10-24T13:38:56,819][INFO ][o.e.b.Elasticsearch      ] [es1] JVM arguments [-Des.networkaddress.cache.ttl=60, -Des.networkaddress.cache.negative.ttl=10, -XX:+AlwaysPreTouch, -Xss1m, -Djava.awt.headless=true, -Dfile.encoding=UTF-8, -Djna.nosys=true, -XX:-OmitStackTraceInFastThrow, -Dio.netty.noUnsafe=true, -Dio.netty.noKeySetOptimization=true, -Dio.netty.recycler.maxCapacityPerThread=0, --add-
+[2026-10-24T13:38:59,041][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:38:59,675][INFO ][o.e.e.NodeEnvironment    ] [es1] heap size [1gb], compressed ordinary object pointers [true]
+[2026-10-24T13:39:01,480][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:39:01,480][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:39:01,481][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:39:11,913][ERROR][o.e.b.Elasticsearch      ] [es1] fatal exception while booting Elasticsearch
+[2026-10-24T13:39:13,399][INFO ][o.e.b.Elasticsearch      ] [es1] JVM arguments [-Des.networkaddress.cache.ttl=60, -Des.networkaddress.cache.negative.ttl=10, -XX:+AlwaysPreTouch, -Xss1m, -Djava.awt.headless=true, -Dfile.encoding=UTF-8, -Djna.nosys=true, -XX:-OmitStackTraceInFastThrow, -Dio.netty.noUnsafe=true, -Dio.netty.noKeySetOptimization=true, -Dio.netty.recycler.maxCapacityPerThread=0, --add-
+[2026-10-24T13:39:15,695][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:16,326][ERROR][o.e.b.Elasticsearch      ] [es1] fatal exception while booting Elasticsearch
+[2026-10-24T13:39:17,827][INFO ][o.e.b.Elasticsearch      ] [es1] JVM arguments [-Des.networkaddress.cache.ttl=60, -Des.networkaddress.cache.negative.ttl=10, -XX:+AlwaysPreTouch, -Xss1m, -Djava.awt.headless=true, -Dfile.encoding=UTF-8, -Djna.nosys=true, -XX:-OmitStackTraceInFastThrow, -Dio.netty.noUnsafe=true, -Dio.netty.noKeySetOptimization=true, -Dio.netty.recycler.maxCapacityPerThread=0, --add-
+[2026-10-24T13:39:20,130][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:20,771][ERROR][o.e.b.Elasticsearch      ] [es1] fatal exception while booting Elasticsearch
+[2026-10-24T13:39:22,214][INFO ][o.e.b.Elasticsearch      ] [es1] JVM arguments [-Des.networkaddress.cache.ttl=60, -Des.networkaddress.cache.negative.ttl=10, -XX:+AlwaysPreTouch, -Xss1m, -Djava.awt.headless=true, -Dfile.encoding=UTF-8, -Djna.nosys=true, -XX:-OmitStackTraceInFastThrow, -Dio.netty.noUnsafe=true, -Dio.netty.noKeySetOptimization=true, -Dio.netty.recycler.maxCapacityPerThread=0, --add-
+[2026-10-24T13:39:24,481][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:25,061][INFO ][o.e.e.NodeEnvironment    ] [es1] heap size [1gb], compressed ordinary object pointers [true]
+[2026-10-24T13:39:26,854][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:39:26,855][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:39:26,855][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:39:28,595][INFO ][o.e.x.d.l.DeprecationIndexingComponent] [es1] deprecation component started
+[2026-10-24T13:39:28,638][INFO ][o.e.t.TransportService   ] [es1] publish_address {192.168.60.11:9300}, bound_addresses {192.168.60.11:9300}
+[2026-10-24T13:39:28,817][WARN ][i.o.usage                ] [es1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+[2026-10-24T13:39:28,869][INFO ][o.e.h.AbstractHttpServerTransport] [es1] publish_address {192.168.60.11:9200}, bound_addresses {192.168.60.11:9200}
+[2026-10-24T13:39:28,870][INFO ][o.e.n.Node               ] [es1] started {es1}{kJIxUfY_TDCLLhP-qJWblg}{DnKqwHqXToqnNhTQyectoA}{es1}{192.168.60.11}{192.168.60.11:9300}{dim}{9.5.5}{8000099-9111000}{ml.config_version=12.0.0, transform.config_version=10.0.0, xpack.installed=true}
+[2026-10-24T13:39:28,872][INFO ][o.e.x.w.AbstractLicenseCheckingWriteLoadForecaster] [es1] license state changed, now [valid]
+
+[es1]# cat /proc/$(pgrep -f org.elasticsearch.bootstrap.Elasticsearch | head -1)/limits | grep -E "open files|processes|locked memory|address space"
+Max processes             4096                 4096                 processes 
+Max open files            65535                65535                files     
+Max locked memory         unlimited            unlimited            bytes     
+Max address space         unlimited            unlimited            bytes     
+
+[es1]# ls -l /var/log/elasticsearch/
+total 1012
+-rw-r--r-- 1 elasticsearch elasticsearch 221640 Oct 24 13:39 es-single.log
+-rw-r--r-- 1 elasticsearch elasticsearch      0 Oct 24 13:38 es-single_audit.json
+-rw-r--r-- 1 elasticsearch elasticsearch   5204 Oct 24 13:39 es-single_deprecation.json
+-rw-r--r-- 1 elasticsearch elasticsearch      0 Oct 24 13:38 es-single_esql_querylog.json
+-rw-r--r-- 1 elasticsearch elasticsearch      0 Oct 24 13:38 es-single_index_indexing_slowlog.json
+-rw-r--r-- 1 elasticsearch elasticsearch      0 Oct 24 13:38 es-single_index_search_slowlog.json
+-rw-r--r-- 1 elasticsearch elasticsearch      0 Oct 24 13:38 es-single_querylog.json
+-rw-r--r-- 1 elasticsearch elasticsearch 561519 Oct 24 13:39 es-single_server.json
+-rw-r--r-- 1 elasticsearch elasticsearch  54345 Oct 24 13:39 gc.log
+-rw-r--r-- 1 elasticsearch elasticsearch  53575 Oct 24 13:38 gc.log.00
+-rw-r--r-- 1 elasticsearch elasticsearch  43875 Oct 24 13:39 gc.log.01
+-rw-r--r-- 1 elasticsearch elasticsearch  36535 Oct 24 13:39 gc.log.02
+-rw-r--r-- 1 elasticsearch elasticsearch  36870 Oct 24 13:39 gc.log.03
+
+
+======== elastic 密碼：重設為隨機值，再用 API 改成實驗用密碼 ========  (2026-10-24 21:39:29)
+[es1]# /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s
+（輸出的隨機密碼省略，長度 20）
+
+[es1] POST /_security/user/elastic/_password
+{"password":"ChangeMe_Elastic_2026"}
+{}
+
+
+======== 步驟 5：驗證 ========  (2026-10-24 21:39:32)
+[es1] GET /
+{
+  "name" : "es1",
+  "cluster_name" : "es-single",
+  "cluster_uuid" : "VnTmTuzpRC2If37EW7g_TQ",
+  "version" : {
+    "number" : "9.5.5",
+    "build_flavor" : "default",
+    "build_type" : "rpm",
+    "build_hash" : "48acba663b09e70b115dd879329141506c377890",
+    "build_date" : "2026-09-30T22:12:03.984586187Z",
+    "build_snapshot" : false,
+    "lucene_version" : "10.5.1",
+    "minimum_wire_compatibility_version" : "8.19.0",
+    "minimum_index_compatibility_version" : "8.0.0"
+  },
+  "tagline" : "You Know, for Search"
+}
+
+
+[es1] GET /_cat/nodes?v&h=name,ip,version,node.role,master,heap.max,ram.max,cpu,disk.total
+name ip            version node.role master heap.max ram.max cpu disk.total
+es1  192.168.60.11 9.5.5   dim       *           1gb   7.7gb  16    452.1gb
+
+
+[es1] GET /_cluster/health?pretty
+{
+  "cluster_name" : "es-single",
+  "status" : "green",
+  "timed_out" : false,
+  "number_of_nodes" : 1,
+  "number_of_data_nodes" : 1,
+  "active_primary_shards" : 1,
+  "active_shards" : 1,
+  "relocating_shards" : 0,
+  "initializing_shards" : 0,
+  "unassigned_shards" : 0,
+  "unassigned_primary_shards" : 0,
+  "delayed_unassigned_shards" : 0,
+  "number_of_pending_tasks" : 0,
+  "number_of_in_flight_fetch" : 0,
+  "task_max_waiting_in_queue_millis" : 0,
+  "active_shards_percent_as_number" : 100.0
+}
+
+
+[es1] GET /_nodes/_local/process?filter_path=nodes.*.process.mlockall,nodes.*.process.max_file_descriptors&pretty
+{
+  "nodes" : {
+    "kJIxUfY_TDCLLhP-qJWblg" : {
+      "process" : {
+        "mlockall" : true
+      }
+    }
+  }
+}
+
+
+[es1] GET /_nodes/_local/jvm?filter_path=nodes.*.jvm.version,nodes.*.jvm.vm_name,nodes.*.jvm.mem,nodes.*.jvm.gc_collectors,nodes.*.jvm.using_compressed_ordinary_object_pointers,nodes.*.jvm.input_arguments&pretty
+{
+  "nodes" : {
+    "kJIxUfY_TDCLLhP-qJWblg" : {
+      "jvm" : {
+        "version" : "27",
+        "vm_name" : "OpenJDK 64-Bit Server VM",
+        "mem" : {
+          "heap_init_in_bytes" : 1073741824,
+          "heap_max_in_bytes" : 1073741824,
+          "non_heap_init_in_bytes" : 7667712,
+          "non_heap_max_in_bytes" : 0,
+          "direct_max_in_bytes" : 536870912
+        },
+        "gc_collectors" : [
+          "G1 Young Generation",
+          "G1 Concurrent GC",
+          "G1 Old Generation"
+        ],
+        "using_compressed_ordinary_object_pointers" : "true",
+        "input_arguments" : [
+          "-Des.networkaddress.cache.ttl=60",
+          "-Des.networkaddress.cache.negative.ttl=10",
+          "-XX:+AlwaysPreTouch",
+          "-Xss1m",
+          "-Djava.awt.headless=true",
+          "-Dfile.encoding=UTF-8",
+          "-Djna.nosys=true",
+          "-XX:-OmitStackTraceInFastThrow",
+          "-Dio.netty.noUnsafe=true",
+          "-Dio.netty.noKeySetOptimization=true",
+          "-Dio.netty.recycler.maxCapacityPerThread=0",
+          "--add-opens=org.apache.lucene.core/org.apache.lucene.codecs.lucene99=org.elasticsearch.server",
+          "--add-opens=org.apache.lucene.core/org.apache.lucene.codecs.hnsw=org.elasticsearch.server",
+          "--add-opens=org.apache.lucene.core/org.apache.lucene.internal.vectorization=org.elasticsearch.server",
+          "-Dlog4j.shutdownHookEnabled=false",
+          "-Dlog4j2.disable.jmx=true",
+          "-Dlog4j2.formatMsgNoLookups=true",
+          "-Djava.locale.providers=CLDR",
+          "-Dorg.apache.lucene.vectorization.upperJavaFeatureVersion=27",
+          "-Des.path.home=/usr/share/elasticsearch",
+          "-Des.distribution.type=rpm",
+          "-Des.java.type=bundled JDK",
+          "--enable-native-access=org.elasticsearch.nativeaccess,org.elasticsearch.foreign,org.apache.lucene.core",
+          "--enable-native-access=ALL-UNNAMED",
+          "--illegal-native-access=deny",
+          "-XX:ReplayDataFile=/var/log/elasticsearch/replay_pid%p.log",
+          "-XX:+EnableDynamicAgentLoading",
+          "-Djdk.attach.allowAttachSelf=true",
+          "--patch-module=java.base=/usr/share/elasticsearch/lib/entitlement-bridge/elasticsearch-entitlement-bridge-9.5.5.jar",
+          "--add-exports=java.base/org.elasticsearch.entitlement.bridge=org.elasticsearch.entitlement,java.logging,java.net.http,java.naming,jdk.net,jdk.zipfs,jdk.management.agent",
+          "-XX:+UseG1GC",
+          "-Djava.io.tmpdir=/tmp/elasticsearch-7285312730374438221",
+          "--add-modules=jdk.incubator.vector",
+          "-Dorg.apache.lucene.store.defaultReadAdvice=normal",
+          "-Dorg.apache.lucene.store.MMapDirectory.sharedArenaMaxPermits=1",
+          "--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED",
+          "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+          "-XX:+HeapDumpOnOutOfMemoryError",
+          "-XX:+ExitOnOutOfMemoryError",
+          "-XX:ErrorFile=hs_err_pid%p.log",
+          "-Xlog:gc*,gc+age=trace,safepoint:file=gc.log:utctime,level,pid,tags:filecount=32,filesize=64m",
+          "-Xms1g",
+          "-Xmx1g",
+          "-XX:MaxDirectMemorySize=536870912",
+          "-XX:G1HeapRegionSize=4m",
+          "-XX:G1IHOP=30",
+          "-XX:G1ReservePercent=15",
+          "--module-path=/usr/share/elasticsearch/lib",
+          "--add-modules=jdk.net",
+          "--add-modules=jdk.management.agent",
+          "--add-modules=ALL-MODULE-PATH",
+          "-Djdk.module.main=org.elasticsearch.server"
+        ]
+      }
+    }
+  }
+}
+
+
+[es1] GET /_nodes/_local/os?filter_path=nodes.*.os.available_processors,nodes.*.os.allocated_processors&pretty
+{
+  "nodes" : {
+    "kJIxUfY_TDCLLhP-qJWblg" : {
+      "os" : {
+        "available_processors" : 10,
+        "allocated_processors" : 10
+      }
+    }
+  }
+}
+
+
+[es1] GET /_cat/thread_pool?v&h=name,type,size,queue_size&s=name
+name                                   type    size queue_size
+analyze                                fixed      1         16
+auto_complete                          fixed      2        100
+azure_event_loop                       scaling              -1
+ccr                                    fixed     32        100
+cluster_coordination                   fixed      1         -1
+dlm_frozen_transition                  fixed     20        200
+downsample_indexing                    fixed      1        256
+esql_external_io                       scaling              -1
+esql_worker                            fixed     16       2512
+fetch_shard_started                    scaling              -1
+fetch_shard_store                      scaling              -1
+flush                                  scaling              -1
+force_merge                            fixed      1         -1
+generic                                scaling              -1
+get                                    fixed     16       1000
+inference_response                     scaling              -1
+inference_utility                      scaling              -1
+management                             scaling              -1
+merge                                  scaling              -1
+ml_datafeed                            scaling              -1
+ml_job_comms                           scaling              -1
+ml_native_inference_comms              scaling              -1
+ml_utility                             scaling              -1
+model_download                         fixed      5         -1
+profiling                              scaling              -1
+refresh                                scaling              -1
+repository_azure                       scaling              -1
+rollup_indexing                        fixed      1         -1
+search                                 fixed     16      16000
+search_coordination                    fixed      5       1000
+searchable_snapshots_cache_fetch_async scaling              -1
+searchable_snapshots_cache_prewarming  scaling              -1
+security-crypto                        fixed      5       1000
+security-token-key                     fixed      1       1000
+snapshot                               scaling              -1
+snapshot_meta                          scaling              -1
+system_critical_read                   fixed      5       2000
+system_critical_write                  fixed      5       1500
+system_read                            fixed      5       2000
+system_write                           fixed      5       1000
+system_write_coordination              fixed      5       1000
+warmer                                 scaling              -1
+watcher                                fixed     50       1000
+write                                  fixed     10      10000
+write_coordination                     fixed     10      10000
+
+
+[es1] GET /_nodes/_local/settings?flat_settings&filter_path=nodes.*.settings&pretty
+{
+  "nodes" : {
+    "kJIxUfY_TDCLLhP-qJWblg" : {
+      "settings" : {
+        "action.auto_create_index" : "true",
+        "action.destructive_requires_name" : "true",
+        "bootstrap.memory_lock" : "true",
+        "cluster.election.strategy" : "supports_voting_only",
+        "cluster.info.update.interval" : "30s",
+        "cluster.max_shards_per_node" : "1000",
+        "cluster.name" : "es-single",
+        "cluster.no_master_block" : "write",
+        "cluster.routing.allocation.allow_rebalance" : "always",
+        "cluster.routing.allocation.cluster_concurrent_rebalance" : "2",
+        "cluster.routing.allocation.disk.threshold_enabled" : "true",
+        "cluster.routing.allocation.disk.watermark.flood_stage" : "95%",
+        "cluster.routing.allocation.disk.watermark.flood_stage.max_headroom" : "100GB",
+        "cluster.routing.allocation.disk.watermark.high" : "90%",
+        "cluster.routing.allocation.disk.watermark.high.max_headroom" : "150GB",
+        "cluster.routing.allocation.disk.watermark.low" : "85%",
+        "cluster.routing.allocation.disk.watermark.low.max_headroom" : "200GB",
+        "cluster.routing.allocation.enable" : "all",
+        "cluster.routing.allocation.node_concurrent_recoveries" : "2",
+        "cluster.routing.allocation.node_initial_primaries_recoveries" : "4",
+        "cluster.routing.rebalance.enable" : "all",
+        "cluster.state.encryption.required" : "true",
+        "discovery.type" : "single-node",
+        "http.compression" : "false",
+        "http.max_content_length" : "100mb",
+        "http.port" : "9200",
+        "http.type" : "security4",
+        "http.type.default" : "netty4",
+        "indexing_pressure.memory.limit" : "10%",
+        "indices.breaker.fielddata.limit" : "40%",
+        "indices.breaker.request.limit" : "60%",
+        "indices.breaker.total.limit" : "95%",
+        "indices.breaker.total.use_real_memory" : "true",
+        "indices.fielddata.cache.size" : "20%",
+        "indices.memory.index_buffer_size" : "10%",
+        "indices.memory.min_index_buffer_size" : "48mb",
+        "indices.queries.cache.size" : "10%",
+        "indices.recovery.max_bytes_per_sec" : "40mb",
+        "indices.recovery.max_concurrent_file_chunks" : "2",
+        "indices.recovery.max_concurrent_operations" : "1",
+        "indices.requests.cache.size" : "1%",
+        "ingest.geoip.downloader.enabled" : "false",
+        "network.breaker.inflight_requests.limit" : "100%",
+        "network.host" : "192.168.60.11",
+        "network.tcp.keep_alive" : "true",
+        "network.tcp.keep_idle" : "-1",
+        "network.tcp.no_delay" : "true",
+        "node.attr.ml.config_version" : "12.0.0",
+        "node.attr.transform.config_version" : "10.0.0",
+        "node.attr.xpack.installed" : "true",
+        "node.name" : "es1",
+        "node.roles" : [
+          "master",
+          "data",
+          "ingest"
+        ],
+        "path.data" : "/var/lib/elasticsearch",
+        "path.home" : "/usr/share/elasticsearch",
+        "path.logs" : "/var/log/elasticsearch",
+        "path.repo" : [
+          "/mnt/es-snapshots"
+        ],
+        "script.cache.max_size" : "3000",
+        "script.max_compilations_rate" : "150/5m",
+        "search.allow_expensive_queries" : "true",
+        "search.default_search_timeout" : "-1",
+        "search.max_buckets" : "65536",
+        "search.max_keep_alive" : "24h",
+        "search.max_open_scroll_context" : "500",
+        "thread_pool.search.queue_size" : "16000",
+        "thread_pool.write.queue_size" : "10000",
+        "transport.compress" : "indexing_data",
+        "transport.compression_scheme" : "lz4",
+        "transport.port" : "9300",
+        "transport.type" : "security4",
+        "transport.type.default" : "netty4",
+        "xpack.monitoring.collection.enabled" : "false",
+        "xpack.security.enabled" : "true",
+        "xpack.security.enrollment.enabled" : "true",
+        "xpack.security.http.ssl.enabled" : "true",
+        "xpack.security.transport.ssl.enabled" : "true"
+      }
+    }
+  }
+}
+
+
+
+======== 設定檔 vs 預設值比對（預設值來自 05-defaults.sh 匯出的 9.5.5 全新節點） ========  (2026-10-24 21:39:33)
+[es1]# python3 /root/bin/checkconf.py /etc/elasticsearch/elasticsearch.yml /root/results/defaults-node-9.5.5.txt /root/results/actual-node-es1.json
+--- 設定檔參數數量與標記
+建議	8
+必要	13
+預設	48
+--- 需要確認的項目（CHECK / UNKNOWN；UNKNOWN 代表預設值清單裡沒有這個參數，例如沒有預設值的路徑、清單型設定）
+line	tag	setting	file	default	actual	result
+--- 標「建議」的參數：設定值與預設值
+node.roles	[ master, data, ingest ]	(預設 ["data","data_cold","data_content","data_frozen","data_hot","data_warm","ingest","master","ml","remote_cluster_client","transform"])
+path.repo	[ "/mnt/es-snapshots" ]	(預設 [])
+bootstrap.memory_lock	true	(預設 false)
+network.host	192.168.60.11	(預設 [])
+http.port	9200	(預設 9200-9300)
+transport.port	9300	(預設 9300-9399)
+indices.fielddata.cache.size	20%	(預設 -1b)
+ingest.geoip.downloader.enabled	false	(預設 true)
+--- 共 69 個參數，ok 69 個
+
+[es1] GET /_cluster/settings?include_defaults=true&filter_path=defaults.thread_pool.write.*,defaults.thread_pool.search.*,defaults.node.processors&pretty
+{
+  "defaults" : {
+    "thread_pool" : {
+      "search" : {
+        "queue_size" : "16000",
+        "size" : "16"
+      },
+      "write" : {
+        "queue_size" : "10000",
+        "size" : "10",
+        "ewma_alpha" : "0.02",
+        "utilization_ewmr" : {
+          "half_life" : "5m"
+        }
+      }
+    },
+    "node" : {
+      "processors" : "10.0"
+    }
+  }
+}
+
+
+
+======== 索引範本（component template 用 YAML 送出，註解會被忽略） ========  (2026-10-24 21:39:33)
+[es1] PUT /_component_template/base-settings
+（body：/root/conf/index-template-single.yaml）
+---
+acknowledged: true
+
+
+[es1] PUT /_index_template/apps
+{"index_patterns":["orders*","app-*"],"composed_of":["base-settings"],"priority":200,"version":1}
+{"acknowledged":true}
+
+[es1] POST /_index_template/_simulate_index/orders?filter_path=template.settings&pretty
+{
+  "template" : {
+    "settings" : {
+      "index" : {
+        "allocation" : {
+          "max_retries" : "5"
+        },
+        "mapping" : {
+          "coerce" : "false",
+          "nested_fields" : {
+            "limit" : "100"
+          },
+          "nested_objects" : {
+            "limit" : "10000"
+          },
+          "depth" : {
+            "limit" : "20"
+          },
+          "ignore_malformed" : "false",
+          "total_fields" : {
+            "limit" : "1000"
+          }
+        },
+        "indexing" : {
+          "slowlog" : {
+            "include" : {
+              "user" : "true"
+            },
+            "threshold" : {
+              "index" : {
+                "warn" : "5s",
+                "info" : "2s"
+              }
+            },
+            "source" : "1000"
+          }
+        },
+        "translog" : {
+          "flush_threshold_age" : "1m",
+          "flush_threshold_size" : "10gb",
+          "sync_interval" : "5s",
+          "durability" : "request"
+        },
+        "auto_expand_replicas" : "false",
+        "max_inner_result_window" : "100",
+        "max_result_window" : "10000",
+        "requests" : {
+          "cache" : {
+            "enable" : "true"
+          }
+        },
+        "max_terms_count" : "65536",
+        "number_of_replicas" : "0",
+        "queries" : {
+          "cache" : {
+            "enabled" : "true"
+          }
+        },
+        "codec" : "default",
+        "routing" : {
+          "allocation" : {
+            "include" : {
+              "_tier_preference" : "data_content"
+            },
+            "total_shards_per_node" : "-1"
+          }
+        },
+        "search" : {
+          "slowlog" : {
+            "include" : {
+              "user" : "true"
+            },
+            "threshold" : {
+              "fetch" : {
+                "warn" : "1s",
+                "info" : "500ms"
+              },
+              "query" : {
+                "warn" : "5s",
+                "info" : "2s"
+              }
+            }
+          },
+          "idle" : {
+            "after" : "30s"
+          }
+        },
+        "number_of_shards" : "1",
+        "merge" : {
+          "scheduler" : {
+            "auto_throttle" : "true"
+          },
+          "policy" : {
+            "max_merge_at_once" : "16",
+            "segments_per_tier" : "8.0",
+            "floor_segment" : "16mb",
+            "deletes_pct_allowed" : "20.0"
+          }
+        },
+        "max_refresh_listeners" : "1000",
+        "max_regex_length" : "1000",
+        "shard" : {
+          "check_on_startup" : "false"
+        },
+        "write" : {
+          "wait_for_active_shards" : "1"
+        }
+      }
+    }
+  }
+}
+
+
+[es1] PUT /orders
+{"mappings":{"dynamic":"strict","properties":{"order_id":{"type":"keyword"},"customer_id":{"type":"keyword"},"status":{"type":"keyword"},"amount":{"type":"scaled_float","scaling_factor":100},"region":{"type":"keyword"},"product":{"type":"keyword"},"qty":{"type":"integer"},"created_at":{"type":"date"},"note":{"type":"text"}}}}
+{"acknowledged":true,"shards_acknowledged":true,"index":"orders"}
+
+[es1]# python3 /root/bin/checkconf.py /root/conf/index-template-single.yaml /root/results/defaults-index-9.5.5.txt /root/results/actual-index-es1.json
+--- 設定檔參數數量與標記
+建議	9
+預設	31
+--- 需要確認的項目（CHECK / UNKNOWN；UNKNOWN 代表預設值清單裡沒有這個參數，例如沒有預設值的路徑、清單型設定）
+line	tag	setting	file	default	actual	result
+--- 標「建議」的參數：設定值與預設值
+index.number_of_replicas	0	(預設 1)
+index.search.slowlog.threshold.query.warn	5s	(預設 -1)
+index.search.slowlog.threshold.query.info	2s	(預設 -1)
+index.search.slowlog.threshold.fetch.warn	1s	(預設 -1)
+index.search.slowlog.threshold.fetch.info	500ms	(預設 -1)
+index.search.slowlog.include.user	true	(預設 false)
+index.indexing.slowlog.threshold.index.warn	5s	(預設 -1)
+index.indexing.slowlog.threshold.index.info	2s	(預設 -1)
+index.indexing.slowlog.include.user	true	(預設 false)
+--- 共 40 個參數，ok 40 個
+
+[es1] GET /_cluster/health?filter_path=status,active_shards,unassigned_shards
+{"status":"green","active_shards":2,"unassigned_shards":0}
+
+
+======== 帳號：應用程式用的角色與使用者 ========  (2026-10-24 21:39:34)
+[es1] PUT /_security/role/orders_rw
+{"cluster":["monitor"],"indices":[{"names":["orders*"],"privileges":["read","create_doc","index","view_index_metadata"]}]}
+{"role":{"created":true}}
+
+[es1] PUT /_security/user/app
+{"password":"ChangeMe_App_2026","roles":["orders_rw"],"full_name":"Order application"}
+{"created":true}
+
+[es1]# curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt -u app:ChangeMe_App_2026 -X POST "https://es1:9200/orders/_doc?refresh=wait_for" -H "Content-Type: application/json" -d "{\"order_id\":\"ORD-TEST-1\",\"status\":\"paid\",\"amount\":100,\"created_at\":\"2026-10-24T08:00:00Z\"}"; echo
+{"_index":"orders","_id":"cU4jbqEB2bGJOJ4sYe6h","_version":1,"result":"created","_shards":{"total":1,"successful":1,"failed":0},"_seq_no":0,"_primary_term":1}
+
+[es1]# curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt -u app:ChangeMe_App_2026 -X DELETE "https://es1:9200/orders" | jq -c ".error | {type, reason}"
+{"type":"security_exception","reason":"action [indices:admin/delete] is unauthorized for user [app] with effective roles [orders_rw] on indices [orders], this action is granted by the index privileges [delete_index,manage,all]"}
+
+[es1]# curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt -u app:wrong "https://es1:9200/" | jq -c ".error | {type, reason}, .status"
+{"type":"security_exception","reason":"unable to authenticate user [app] for REST request [/]"}
+null
+
+[es1]# curl -sS -o /dev/null -w "http://es1:9200/ → %{http_code}\n" http://es1:9200/; curl -sS --cacert /etc/elasticsearch/certs/http_ca.crt -o /dev/null -w "https://es1:9200/（不帶帳號）→ %{http_code}\n" https://es1:9200/
+curl: (52) Empty reply from server
+http://es1:9200/ → 000
+https://es1:9200/（不帶帳號）→ 401
+
+
+======== bulk 寫入（容器內，只確認服務正常，不代表正式主機效能） ========  (2026-10-24 21:39:35)
+[es1]# /root/bin/gen-orders.sh 300000 > /tmp/orders.ndjson; ls -lh /tmp/orders.ndjson; wc -l < /tmp/orders.ndjson
+-rw-r--r-- 1 root root 65M Oct 24 13:39 /tmp/orders.ndjson
+600000
+
+[es1]# ES_PW=ChangeMe_Elastic_2026 /root/bin/bulk-load.sh es1 orders /tmp/orders.ndjson 5000
+docs=300000 batches=60 failed=0 seconds=3.6 docs/s=83850
+
+[es1] POST /orders/_refresh
+{"_shards":{"total":1,"successful":1,"failed":0}}
+
+[es1] GET /_cat/indices/orders?v&h=health,index,pri,rep,docs.count,store.size,pri.store.size
+health index  pri rep docs.count store.size pri.store.size
+green  orders   1   0     300001     34.6mb         34.6mb
+
+
+[es1] GET /_cat/segments/orders?v&h=shard,segment,docs.count,size,committed,searchable
+shard segment docs.count   size committed searchable
+0     _0               1  5.7kb false     true
+0     _1           50000  5.8mb false     true
+0     _2          125000 14.4mb false     true
+0     _3          125000 14.3mb false     true
+
+
+[es1] GET /_stats/indexing,refresh,merge,flush?filter_path=_all.primaries.indexing.index_total,_all.primaries.indexing.index_time_in_millis,_all.primaries.refresh.total,_all.primaries.merges.total,_all.primaries.flush.total&pretty
+{
+  "_all" : {
+    "primaries" : {
+      "indexing" : {
+        "index_total" : 300001,
+        "index_time_in_millis" : 1576
+      },
+      "merges" : {
+        "total" : 0
+      },
+      "refresh" : {
+        "total" : 7
+      },
+      "flush" : {
+        "total" : 0
+      }
+    }
+  }
+}
+
+
+
+======== 查詢：filter + 聚合 ========  (2026-10-24 21:39:40)
+[es1] POST /orders/_search?filter_path=took,hits.total,aggregations&pretty
+{"size":0,"query":{"bool":{"filter":[{"term":{"status":"paid"}},{"range":{"created_at":{"gte":"2026-07-01","lt":"2026-10-01"}}}]}},"aggs":{"by_region":{"terms":{"field":"region"},"aggs":{"revenue":{"sum":{"field":"amount"}}}}}}
+{
+  "took" : 71,
+  "hits" : {
+    "total" : {
+      "value" : 10000,
+      "relation" : "gte"
+    }
+  },
+  "aggregations" : {
+    "by_region" : {
+      "doc_count_error_upper_bound" : 0,
+      "sum_other_doc_count" : 0,
+      "buckets" : [
+        {
+          "key" : "us",
+          "doc_count" : 2987,
+          "revenue" : {
+            "value" : 3035533.84
+          }
+        },
+        {
+          "key" : "jp",
+          "doc_count" : 2974,
+          "revenue" : {
+            "value" : 3023182.25
+          }
+        },
+        {
+          "key" : "kr",
+          "doc_count" : 2964,
+          "revenue" : {
+            "value" : 2954580.17
+          }
+        },
+        {
+          "key" : "sg",
+          "doc_count" : 2947,
+          "revenue" : {
+            "value" : 3018648.1
+          }
+        },
+        {
+          "key" : "tw",
+          "doc_count" : 2887,
+          "revenue" : {
+            "value" : 2929815.83
+          }
+        }
+      ]
+    }
+  }
+}
+
+
+[es1] POST /orders/_search?filter_path=took,hits.total,hits.hits._source.order_id&pretty
+{"size":3,"query":{"match":{"note":"laptop"}},"sort":[{"created_at":"desc"}]}
+{
+  "took" : 29,
+  "hits" : {
+    "total" : {
+      "value" : 10000,
+      "relation" : "gte"
+    },
+    "hits" : [
+      {
+        "_source" : {
+          "order_id" : "ORD-000229017"
+        }
+      },
+      {
+        "_source" : {
+          "order_id" : "ORD-000204876"
+        }
+      },
+      {
+        "_source" : {
+          "order_id" : "ORD-000076633"
+        }
+      }
+    ]
+  }
+}
+
+
+[es1] GET /_nodes/stats/indices/query_cache,request_cache?filter_path=nodes.*.indices.query_cache.memory_size_in_bytes,nodes.*.indices.query_cache.hit_count,nodes.*.indices.request_cache&pretty
+{
+  "nodes" : {
+    "kJIxUfY_TDCLLhP-qJWblg" : {
+      "indices" : {
+        "query_cache" : {
+          "memory_size_in_bytes" : 0,
+          "hit_count" : 0
+        },
+        "request_cache" : {
+          "memory_size_in_bytes" : 840,
+          "evictions" : 0,
+          "hit_count" : 0,
+          "miss_count" : 1
+        }
+      }
+    }
+  }
+}
+
+
+
+======== 慢查詢日誌：暫時把門檻設為 0ms ========  (2026-10-24 21:39:40)
+[es1] PUT /orders/_settings
+{"index.search.slowlog.threshold.query.info":"0ms"}
+{"acknowledged":true}
+
+[es1] POST /orders/_search?filter_path=took
+{"size":0,"query":{"wildcard":{"customer_id":{"value":"*99"}}}}
+{"took":24}
+
+[es1]# sleep 1; tail -1 /var/log/elasticsearch/es-single_index_search_slowlog.json | jq -c "{\"@timestamp\", \"log.level\", \"elasticsearch.slowlog.took\", \"elasticsearch.slowlog.source\", \"user.name\"}"
+{"@timestamp":"2026-10-24T13:39:41.065Z","log.level":"INFO","elasticsearch.slowlog.took":"16.5ms","elasticsearch.slowlog.source":"{\\\"size\\\":0,\\\"query\\\":{\\\"wildcard\\\":{\\\"customer_id\\\":{\\\"wildcard\\\":\\\"*99\\\",\\\"boost\\\":1.0}}}}","user.name":"elastic"}
+
+[es1] PUT /orders/_settings
+{"index.search.slowlog.threshold.query.info":null}
+{"acknowledged":true}
+
+
+======== 快照儲存庫（單節點用本機路徑） ========  (2026-10-24 21:39:42)
+[es1] PUT /_snapshot/local_repo
+{"type":"fs","settings":{"location":"/mnt/es-snapshots/single"}}
+{"acknowledged":true}
+
+[es1] POST /_snapshot/local_repo/_verify?pretty
+{
+  "nodes" : {
+    "kJIxUfY_TDCLLhP-qJWblg" : {
+      "name" : "es1"
+    }
+  }
+}
+
+
+[es1] PUT /_snapshot/local_repo/snap-1?wait_for_completion=true&filter_path=snapshot.state,snapshot.indices,snapshot.shards,snapshot.duration_in_millis
+{"indices":"orders","include_global_state":false}
+{"snapshot":{"indices":["orders"],"state":"SUCCESS","duration_in_millis":1008,"shards":{"total":1,"failed":0,"successful":1}}}
+
+
+======== 重啟後資料仍在 ========  (2026-10-24 21:39:43)
+[es1]# time systemctl restart elasticsearch
+
+real	0m14.258s
+user	0m0.000s
+sys	0m0.003s
+
+（重啟後 .security 索引可用、可以登入：等了 1 秒）
+[es1] GET /_cat/indices/orders?v&h=health,index,docs.count,store.size
+health index  docs.count store.size
+green  orders     300001     34.6mb
+
+
+
+======== 錯誤日誌中的 WARN / ERROR ========  (2026-10-24 21:39:59)
+[es1]# grep -E '\]\[(WARN|ERROR)' /var/log/elasticsearch/es-single.log | cut -c1-400 || echo '(none)'
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] Unable to lock JVM Memory: error=12, reason=Cannot allocate memory
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] This can result in part of the JVM being swapped out.
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] Increase RLIMIT_MEMLOCK, soft limit: 8388608, hard limit: 8388608
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] These can be adjusted by modifying /etc/security/limits.conf, for example:
+[2026-10-24T13:38:11,033][WARN ][o.e.n.NativeAccess       ] [es1] If you are logged in interactively, you will have to re-login for the new limits to take effect.
+[2026-10-24T13:38:13,337][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:38:15,788][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:38:15,788][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:38:15,788][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:38:22,690][WARN ][o.e.b.BootstrapChecks    ] [es1] memory locking requested for elasticsearch process but memory is not locked; for more information see [https://www.elastic.co/docs/deploy-manage/deploy/self-managed/bootstrap-checks?version=9.5#bootstrap-checks-memory-lock]
+[2026-10-24T13:38:22,777][WARN ][i.o.usage                ] [es1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+[2026-10-24T13:38:23,499][WARN ][o.e.x.s.s.S.SecurityMigration] [es1] Submit security migration task failed
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [reindex-data-stream-pipeline] for [stack]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [behavioral_analytics-events-final_pipeline] for [enterprise_search]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs@default-pipeline] for [stack]
+[2026-10-24T13:38:23,500][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs-apm.app@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.transaction@default-pipeline] for [apm]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs-default-pipeline] for [stack]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [ml-size-based-ilm-policy] for [ml]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [apm@pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [traces-apm@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics] for [stack]
+[2026-10-24T13:38:23,497][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.service_transaction@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.service_summary@default-pipeline] for [apm]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs] for [stack]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [traces-apm.rum@default-pipeline] for [apm]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.app@default-pipeline] for [apm]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [synthetics] for [stack]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs@json-message] for [stack]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [metrics-apm.service_destination@default-pipeline] for [apm]
+[2026-10-24T13:38:23,503][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [30-days-default] for [stack]
+[2026-10-24T13:38:23,502][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [search-default-ingestion] for [enterprise_search]
+[2026-10-24T13:38:23,504][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [7-days-default] for [stack]
+[2026-10-24T13:38:23,503][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs@json-pipeline] for [stack]
+[2026-10-24T13:38:23,501][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding ingest pipeline template [logs-apm.error@default-pipeline] for [apm]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [180-days-default] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [365-days-default] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [90-days-default] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [30-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [synthetics@lifecycle] for [stack]
+[2026-10-24T13:38:23,505][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [7-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [365-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [90-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [watch-history-ilm-policy-16] for [watcher]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [slm-history-ilm-policy] for [index_lifecycle]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [180-days@lifecycle] for [stack]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-tohost-meta-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.deprecation-indexing-ilm-policy] for [deprecation]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-actions-results-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-fromhost-data-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-tohost-data-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.fleet-file-fromhost-meta-ilm-policy] for [fleet]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [ilm-history-ilm-policy] for [index_lifecycle]
+[2026-10-24T13:38:23,506][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [.monitoring-8-ilm-policy] for [monitoring]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_destination_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.app_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs-apm.error_logs-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_destination_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_transaction_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces-apm.rum_traces-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces-apm.traces-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.transaction_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_summary_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_transaction_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.transaction_60m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [traces-apm.sampled_traces-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_destination_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [logs-apm.app_logs-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.internal_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_summary_1m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_summary_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,507][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.service_transaction_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:23,508][WARN ][o.e.x.c.t.IndexTemplateRegistry] [es1] error adding lifecycle policy [metrics-apm.transaction_10m_metrics-default_policy] for [apm]
+[2026-10-24T13:38:52,981][WARN ][o.e.c.NodeUsageStatsForThreadPoolsCollector] [es1] Got no usage stats from nodes [kJIxUfY_TDCLLhP-qJWblg], using last known stats for them
+[2026-10-24T13:38:52,980][WARN ][o.e.c.InternalClusterInfoService] [es1] failed to retrieve stats for node [kJIxUfY_TDCLLhP-qJWblg]
+[2026-10-24T13:38:59,041][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:01,480][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:39:01,480][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:39:01,481][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:39:11,913][ERROR][o.e.b.Elasticsearch      ] [es1] fatal exception while booting Elasticsearch
+[2026-10-24T13:39:15,695][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:16,326][ERROR][o.e.b.Elasticsearch      ] [es1] fatal exception while booting Elasticsearch
+[2026-10-24T13:39:20,130][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:20,771][ERROR][o.e.b.Elasticsearch      ] [es1] fatal exception while booting Elasticsearch
+[2026-10-24T13:39:24,481][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:26,854][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:39:26,855][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:39:26,855][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:39:28,817][WARN ][i.o.usage                ] [es1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+[2026-10-24T13:39:35,581][WARN ][o.e.x.s.a.RealmsAuthenticator] [es1] Authentication to realm default_native failed - Password authentication failed for app
+[2026-10-24T13:39:44,052][ERROR][o.e.x.i.h.ILMHistoryStore] [es1] failures: [{null=org.elasticsearch.node.NodeClosedException: node closed {es1}{kJIxUfY_TDCLLhP-qJWblg}{DnKqwHqXToqnNhTQyectoA}{es1}{192.168.60.11}{192.168.60.11:9300}{dim}{9.5.5}{8000099-9111000}{ml.config_version=12.0.0, transform.config_version=10.0.0, xpack.installed=true}}]
+[2026-10-24T13:39:49,347][WARN ][o.e.g.CuVSGPUSupport     ] [es1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+[2026-10-24T13:39:51,788][WARN ][stderr                   ] [es1] SLF4J(W): No SLF4J providers were found.
+[2026-10-24T13:39:51,788][WARN ][stderr                   ] [es1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[2026-10-24T13:39:51,788][WARN ][stderr                   ] [es1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[2026-10-24T13:39:57,930][WARN ][i.o.usage                ] [es1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+[2026-10-24T13:39:58,237][ERROR][o.e.x.s.a.e.ReservedRealm] [es1] failed to retrieve password hash for reserved user [elastic]
+[2026-10-24T13:39:58,238][WARN ][o.e.x.s.a.RealmsAuthenticator] [es1] An error occurred while attempting to authenticate [elastic] against realm [reserved]
+[2026-10-24T13:39:58,242][WARN ][r.suppressed             ] [es1] path: /_cluster/health, params: {}, status: 503
+
+[es1]# jq -r ".message" /var/log/elasticsearch/es-single_deprecation.json 2>/dev/null | sort | uniq -c | sort -rn | head -10 || echo "(none)"
+      6 [xpack.monitoring.collection.enabled] setting was deprecated in Elasticsearch and will be removed in a future release. See the breaking changes documentation for the next major version.
+      1 Parameter [default_metric] is deprecated and will be removed in a future version
+      1 Index [.reindexed-v8-ml-anomalies-*] name begins with a dot (.), which is deprecated, and will not be allowed in a future Elasticsearch version.
+      1 Index [.logs-elasticsearch.deprecation-default] name begins with a dot (.), which is deprecated, and will not be allowed in a future Elasticsearch version.
+

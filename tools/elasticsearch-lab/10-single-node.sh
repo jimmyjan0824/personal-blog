@@ -3,11 +3,13 @@
 source "$(dirname "$0")/lib.sh"
 LOG=/var/log/elasticsearch/es-single.log
 docker compose rm -sf es1 >/dev/null 2>&1; docker compose up -d es1; sleep 5
+# snap 是 named volume，重跑時清掉上一輪的單節點快照
+docker compose exec -T es1 rm -rf /mnt/es-snapshots/single /mnt/es-snapshots/single8
 # 在 es1 暫時加一行設定，啟動應該失敗：印出錯誤訊息後還原
 tryconf() {
   x es1 "cp -p /etc/elasticsearch/elasticsearch.yml /tmp/es.yml.ok && echo '$1' >> /etc/elasticsearch/elasticsearch.yml && tail -1 /etc/elasticsearch/elasticsearch.yml"
-  x es1 "systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|Exception|bootstrap check|setting \[' | cut -c1-500 | tail -6"
-  x es1 'cp -p /tmp/es.yml.ok /etc/elasticsearch/elasticsearch.yml; systemctl reset-failed elasticsearch'
+  x es1 "systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|Exception|bootstrap check|setting \[' | cut -c1-500 | tail -6; grep -A1 'fatal exception' $LOG | grep Exception | tail -1 | cut -c1-500"
+  x es1 'cp -p /tmp/es.yml.ok /etc/elasticsearch/elasticsearch.yml; systemctl stop elasticsearch; systemctl reset-failed elasticsearch'
 }
 {
 note "環境"
@@ -38,7 +40,8 @@ x es1 'install -d -o elasticsearch -g elasticsearch -m 750 /mnt/es-snapshots/sin
 note "實測踩坑 1：bootstrap.memory_lock: true，但 systemd 沒有 LimitMEMLOCK"
 x es1 'systemctl start elasticsearch; systemctl is-active elasticsearch'
 x es1 "journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|bootstrap check|memory' | cut -c1-500 | tail -6; grep -E 'bootstrap check|memory lock' $LOG | cut -c1-500 | tail -4"
-x es1 'systemctl reset-failed elasticsearch'
+# discovery.type: single-node 時 bootstrap check 只印 WARN、不會拒絕啟動；不論結果先停掉，後面的踩坑才是從停止狀態啟動
+x es1 'systemctl stop elasticsearch; systemctl reset-failed elasticsearch 2>/dev/null'
 
 note "步驟 3：systemd override"
 x es1 'mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/override.conf && systemctl daemon-reload && systemctl cat elasticsearch | grep -Ev "^\s*(#|$)"'
@@ -75,7 +78,7 @@ e es1 GET '/_nodes/_local/settings?flat_settings&filter_path=nodes.*.settings&pr
 note "設定檔 vs 預設值比對（預設值來自 05-defaults.sh 匯出的 9.5.5 全新節點）"
 eq es1 GET '/_nodes/_local/settings?flat_settings' > results/actual-node-es1.json
 x es1 'python3 /root/bin/checkconf.py /etc/elasticsearch/elasticsearch.yml /root/results/defaults-node-9.5.5.txt /root/results/actual-node-es1.json'
-e es1 GET '/_cluster/settings?include_defaults=true&flat_settings=true&filter_path=defaults.thread_pool.write.*,defaults.thread_pool.search.*,defaults.node.processors&pretty'
+e es1 GET '/_cluster/settings?include_defaults=true&filter_path=defaults.thread_pool.write.*,defaults.thread_pool.search.*,defaults.node.processors&pretty'
 
 note "索引範本（component template 用 YAML 送出，註解會被忽略）"
 e es1 PUT /_component_template/base-settings @/root/conf/index-template-single.yaml
@@ -120,6 +123,7 @@ e es1 PUT '/_snapshot/local_repo/snap-1?wait_for_completion=true&filter_path=sna
 
 note "重啟後資料仍在"
 x es1 'time systemctl restart elasticsearch'
+wait_until "重啟後 .security 索引可用、可以登入" 60 'eq es1 GET "/_cluster/health" | grep -q "\"status\":\"green\""'
 e es1 GET '/_cat/indices/orders?v&h=health,index,docs.count,store.size'
 
 note "錯誤日誌中的 WARN / ERROR"
@@ -132,10 +136,10 @@ docker compose rm -sf esd8 >/dev/null 2>&1; docker compose up -d esd8; sleep 5
 {
 x esd8 'rpm -q elasticsearch; cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-elasticsearch.conf >/dev/null; mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/ && systemctl daemon-reload'
 x esd8 'sed -e "s/^node.name: es1/node.name: esd8/" -e "s/192.168.60.11/192.168.60.42/" /root/conf/elasticsearch-single.yml > /etc/elasticsearch/elasticsearch.yml && install -o root -g elasticsearch -m 660 /root/conf/lab-heap.options /etc/elasticsearch/jvm.options.d/ && install -d -o elasticsearch -g elasticsearch /mnt/es-snapshots/single8'
-x esd8 'systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E "ERROR|Exception|setting \[" | cut -c1-500 | tail -6'
+x esd8 'systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E "ERROR|Exception|setting \[" | cut -c1-500 | tail -6; grep -E "setting \[" /var/log/elasticsearch/es-single.log | cut -c1-500 | head -3'
 note "移除 8.19 不認得的設定後再啟動"
 x esd8 'systemctl reset-failed elasticsearch; sed -i "/^cluster.state.encryption.required/d" /etc/elasticsearch/elasticsearch.yml && time systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E "ERROR|Exception|setting \[" | cut -c1-500 | tail -6'
-PW=$(docker compose exec -T esd8 /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s --url https://localhost:9200 2>/dev/null | tail -1 | tr -d '\r')
+PW=$(docker compose exec -T esd8 /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s --url https://esd8:9200 -E xpack.security.http.ssl.verification_mode=certificate 2>/dev/null | tail -1 | tr -d '\r')
 [ -n "$PW" ] && ES_PW=$PW eq esd8 GET / >/dev/null && ES_PW=$PW e esd8 POST /_security/user/elastic/_password '{"password":"ChangeMe_Elastic_2026"}'
 e esd8 GET '/?filter_path=version.number,version.lucene_version'
 eq esd8 GET '/_nodes/_local/settings?flat_settings' > results/actual-node-esd8.json

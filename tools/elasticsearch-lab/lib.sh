@@ -9,10 +9,10 @@ export PATH="$HOME/.docker/bin:$PATH"
 mkdir -p results
 ES_PW=${ES_PW:-ChangeMe_Elastic_2026}
 # 容器內 curl 指令。RPM 的 auto-config 在 docker build 時就產生憑證（SAN 是 buildkitsandbox / localhost / 127.0.0.1），
-# 所以只有 auto-config 的 http_ca.crt 時改連 localhost；用自己簽的 ca.crt 時照節點名稱連
+# 所以只有 auto-config 的 http_ca.crt 時用 localhost 驗證憑證、實際連到節點位址（--connect-to）；用自己簽的 ca.crt 時照節點名稱連
 curl_cmd() {
   local n=$1 m=$2 path=$3
-  echo "C=/etc/elasticsearch/certs; if [ -f \$C/ca.crt ]; then CA=\$C/ca.crt H=$n; else CA=\$C/http_ca.crt H=localhost; fi; curl -sS --cacert \$CA -u 'elastic:$ES_PW' -X $m \"https://\$H:9200$path\""
+  echo "C=/etc/elasticsearch/certs; if [ -f \$C/ca.crt ]; then CA=\$C/ca.crt H=$n O=; else CA=\$C/http_ca.crt H=localhost O='--connect-to localhost:9200:$n:9200'; fi; curl -sS --cacert \$CA \$O -u 'elastic:$ES_PW' -X $m \"https://\$H:9200$path\""
 }
 x() {
   local n=$1; shift

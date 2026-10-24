@@ -1,0 +1,62 @@
+
+======== 比較：同一份 elasticsearch.yml 放到 8.19.23（esd8） ========  (2026-10-24 21:39:59)
+[esd8]# rpm -q elasticsearch; cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-elasticsearch.conf >/dev/null; mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/ && systemctl daemon-reload
+elasticsearch-8.19.23-1.aarch64
+
+[esd8]# sed -e "s/^node.name: es1/node.name: esd8/" -e "s/192.168.60.11/192.168.60.42/" /root/conf/elasticsearch-single.yml > /etc/elasticsearch/elasticsearch.yml && install -o root -g elasticsearch -m 660 /root/conf/lab-heap.options /etc/elasticsearch/jvm.options.d/ && install -d -o elasticsearch -g elasticsearch /mnt/es-snapshots/single8
+
+[esd8]# systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E "ERROR|Exception|setting \[" | cut -c1-500 | tail -6; grep -E "setting \[" /var/log/elasticsearch/es-single.log | cut -c1-500 | head -3
+Job for elasticsearch.service failed because the control process exited with error code.
+See "systemctl status elasticsearch.service" and "journalctl -xeu elasticsearch.service" for details.
+failed
+Oct 24 13:40:08 esd8 systemd-entrypoint[70]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+Oct 24 13:40:08 esd8 systemd-entrypoint[70]: ERROR: Elasticsearch died while starting up, with exit code 1
+java.lang.IllegalArgumentException: unknown setting [cluster.state.encryption.required] please check that any required plugins are installed, or check the breaking changes documentation for removed settings
+
+
+======== 移除 8.19 不認得的設定後再啟動 ========  (2026-10-24 21:40:08)
+[esd8]# systemctl reset-failed elasticsearch; sed -i "/^cluster.state.encryption.required/d" /etc/elasticsearch/elasticsearch.yml && time systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 40 | grep -E "ERROR|Exception|setting \[" | cut -c1-500 | tail -6
+
+real	0m7.008s
+user	0m0.000s
+sys	0m0.002s
+active
+Oct 24 13:40:08 esd8 systemd-entrypoint[70]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-single.log
+Oct 24 13:40:08 esd8 systemd-entrypoint[70]: ERROR: Elasticsearch died while starting up, with exit code 1
+
+[esd8] POST /_security/user/elastic/_password
+{"password":"ChangeMe_Elastic_2026"}
+{}
+
+[esd8] GET /?filter_path=version.number,version.lucene_version
+{
+  "version" : {
+    "number" : "8.19.23",
+    "lucene_version" : "9.12.2"
+  }
+}
+
+
+[esd8]# python3 /root/bin/checkconf.py /etc/elasticsearch/elasticsearch.yml /root/results/defaults-node-8.19.23.txt /root/results/actual-node-esd8.json
+--- 設定檔參數數量與標記
+建議	8
+必要	13
+預設	47
+--- 需要確認的項目（CHECK / UNKNOWN；UNKNOWN 代表預設值清單裡沒有這個參數，例如沒有預設值的路徑、清單型設定）
+line	tag	setting	file	default	actual	result
+161	預設	thread_pool.search.queue_size	16000	1000	16000	CHECK
+--- 標「建議」的參數：設定值與預設值
+node.roles	[ master, data, ingest ]	(預設 ["data","data_cold","data_content","data_frozen","data_hot","data_warm","ingest","master","ml","remote_cluster_client","transform"])
+path.repo	[ "/mnt/es-snapshots" ]	(預設 [])
+bootstrap.memory_lock	true	(預設 false)
+network.host	192.168.60.42	(預設 [])
+http.port	9200	(預設 9200-9300)
+transport.port	9300	(預設 9300-9399)
+indices.fielddata.cache.size	20%	(預設 -1b)
+ingest.geoip.downloader.enabled	false	(預設 true)
+--- 共 68 個參數，ok 67 個
+
+[esd8]# grep -E '\]\[(WARN|ERROR)' /var/log/elasticsearch/es-single.log | cut -c1-400 || echo '(none)'
+[2026-10-24T13:40:08,387][ERROR][o.e.b.Elasticsearch      ] [esd8] fatal exception while booting Elasticsearch
+[2026-10-24T13:40:15,815][WARN ][i.o.usage                ] [esd8] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+

@@ -3,7 +3,9 @@ x-node: &node
   image: eslab-rocky9-es9
   pull_policy: never
   privileged: true            # systemd 當 PID 1、sysctl、mlockall 需要
-  # 不設 ulimits：沿用 Docker 預設（memlock 8 MB），和實機一樣要靠 systemd 的 LimitMEMLOCK=infinity 才能鎖住 heap
+  # memlock 設成 8 MB（實機 Rocky 9 的預設）：Docker Desktop 的容器預設是 unlimited，systemd 服務會繼承而讓
+  # memory_lock 踩坑重現不出來；和實機一樣要靠 systemd 的 LimitMEMLOCK=infinity 才能鎖住 heap
+  ulimits: { memlock: 8388608 }
   cgroup: host
   volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro", "./bin:/root/bin:ro", "./results:/root/results:ro", "snap:/mnt/es-snapshots"]
   tmpfs: ["/run", "/run/lock"]
