@@ -1,0 +1,9 @@
+# elasticsearch-certutil cert --in 用的節點清單：SAN 包含主機名、FQDN 與 IP（verification_mode: full 會驗證主機名）
+instances:
+  - { name: esc1, dns: [ esc1, esc1.lab.local ], ip: [ 192.168.60.21 ] }
+  - { name: esc2, dns: [ esc2, esc2.lab.local ], ip: [ 192.168.60.22 ] }
+  - { name: esc3, dns: [ esc3, esc3.lab.local ], ip: [ 192.168.60.23 ] }
+  - { name: esc4, dns: [ esc4, esc4.lab.local ], ip: [ 192.168.60.24 ] }
+  - { name: esu1, dns: [ esu1, esu1.lab.local ], ip: [ 192.168.60.31 ] }
+  - { name: esu2, dns: [ esu2, esu2.lab.local ], ip: [ 192.168.60.32 ] }
+  - { name: esu3, dns: [ esu3, esu3.lab.local ], ip: [ 192.168.60.33 ] }

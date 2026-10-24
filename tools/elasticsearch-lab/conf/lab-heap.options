@@ -1,0 +1,5 @@
+# /etc/elasticsearch/jvm.options.d/lab-heap.options
+# 只用在實測環境：Docker Desktop 的 VM 約 7.7 GB 記憶體，好幾個容器共用，
+# 自動計算會讓每個節點都拿到 VM 記憶體的一半，所以這裡固定為 1 GB。正式環境不要放這個檔案
+-Xms1g
+-Xmx1g

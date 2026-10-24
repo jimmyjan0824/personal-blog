@@ -47,3 +47,19 @@ wait_until() {
   for _ in $(seq 1 "$max"); do if eval "$@" >/dev/null 2>&1; then echo "（$desc：等了 $(( $(date +%s)-t0 )) 秒）"; return 0; fi; sleep 1; done
   echo "（$desc：$max 秒內沒有成立）"; return 1
 }
+# 叢集節點的共用設定：OS 參數、systemd override、移除 RPM auto-config 的憑證、放自建 CA 簽的憑證、elasticsearch.yml、heap
+#   setup_node <節點> <IP> <設定檔> [roles 覆寫]
+setup_node() {
+  local n=$1 ip=$2 conf=$3 roles=${4:-}
+  local sedroles=""; [ -n "$roles" ] && sedroles="-e 's/^node.roles: .*/node.roles: $roles/'"
+  x $n "cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-elasticsearch.conf >/dev/null \
+ && mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/ && systemctl daemon-reload \
+ && cd /etc/elasticsearch && rm -f certs/http_ca.crt certs/http.p12 certs/transport.p12 \
+ && for k in xpack.security.http.ssl.keystore.secure_password xpack.security.transport.ssl.keystore.secure_password xpack.security.transport.ssl.truststore.secure_password; do /usr/share/elasticsearch/bin/elasticsearch-keystore remove \$k 2>/dev/null; done; \
+ install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/$n/$n.crt certs/node.crt && install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/$n/$n.key certs/node.key && install -o root -g elasticsearch -m 644 /mnt/es-snapshots/.dist/ca/ca.crt certs/ca.crt \
+ && sed -e 's/^node.name: .*/node.name: $n/' -e 's/^network.host: .*/network.host: $ip/' $sedroles /root/conf/$conf > elasticsearch.yml && chown root:elasticsearch elasticsearch.yml && chmod 660 elasticsearch.yml \
+ && install -o root -g elasticsearch -m 660 /root/conf/heap.options /root/conf/lab-heap.options jvm.options.d/ \
+ && /usr/share/elasticsearch/bin/elasticsearch-keystore list | tr '\n' ' ' && echo && ls certs && grep -E '^(cluster.name|node.name|node.roles|network.host)' elasticsearch.yml"
+}
+# 目前的 master 節點名稱（問第一個有回應的節點）
+master() { local n; for n in "$@"; do eq $n GET '/_cat/master?h=node' 2>/dev/null | tr -d '\r\n ' | grep -E '^es' && return; done; }

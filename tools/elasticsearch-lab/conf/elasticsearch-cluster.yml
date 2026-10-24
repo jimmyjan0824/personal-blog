@@ -1,0 +1,251 @@
+# /etc/elasticsearch/elasticsearch.yml
+# Elasticsearch 9.5 三節點叢集（esc1~esc3 共用，只有 node.name、network.host 不同）：效能與運維設定
+# 以「16 GB RAM、8 vCPU、本機 SSD、專用 Elasticsearch 主機，三台都是 master + data + ingest」為基準。
+# 每個參數上一行的註解：
+#   建議：調整過的值（括號內是預設值）
+#   預設：9.5.5 的預設值（在全新安裝的 9.5.5 上用 GET _cluster/settings?include_defaults 逐一核對過），
+#         寫出來是為了讓設定一目了然，日後要調整時知道從哪裡開始
+#   必要：名稱、路徑、位址、憑證等依環境而定、沒有好壞之分的值
+# 「動態」表示也可以用 PUT _cluster/settings 線上調整（persistent 會蓋過這個檔案），其他的改了要滾動重啟。
+# 索引層級的參數（refresh、translog、merge、慢日誌等）不能寫在這裡，放在索引範本 index-template.yaml。
+
+#------------------------------------------------------------------------------
+# 叢集與節點
+#------------------------------------------------------------------------------
+# 必要（預設 elasticsearch）。同一個網段的叢集名稱不要重複，日誌檔名也用它（/var/log/elasticsearch/es-prod.log）
+cluster.name: es-prod
+# 必要（預設 = 主機名）。cluster.initial_master_nodes 要寫一模一樣的名稱
+node.name: esc1
+# 建議（預設是所有角色：master、data 與各 data tier、ingest、ml、transform、remote_cluster_client）。
+# 小型叢集三台都是 master + data + ingest；不用機器學習就不要給 ml（它會另外啟動原生行程、吃記憶體），
+# 要跨叢集搜尋 / CCR 再加 remote_cluster_client
+node.roles: [ master, data, ingest ]
+# 預設是不設定（只在跨機房 / 機架時才要）。設了之後配合下方的 awareness，主分片與副本會分散到不同 zone
+#node.attr.zone: zone-a
+
+#------------------------------------------------------------------------------
+# 路徑
+#------------------------------------------------------------------------------
+# 必要（RPM 預設）。本機 SSD；不要放 NFS。多顆磁碟用 RAID 0 / LVM 合成一個路徑（多個 path.data 已棄用）
+path.data: /var/lib/elasticsearch
+# 必要（RPM 預設）
+path.logs: /var/log/elasticsearch
+# 建議（預設空）。fs 快照儲存庫的根目錄，所有 master 與 data 節點都要掛載同一個共用路徑（NFS）
+path.repo: [ "/mnt/es-snapshots" ]
+
+#------------------------------------------------------------------------------
+# 記憶體
+#------------------------------------------------------------------------------
+# 建議（預設 false）。啟動時把 heap 鎖在記憶體裡，不會被 swap 出去；
+# 需要 systemd 的 LimitMEMLOCK=infinity（override.conf），否則 bootstrap check 失敗、拒絕啟動
+bootstrap.memory_lock: true
+
+#------------------------------------------------------------------------------
+# 網路
+#------------------------------------------------------------------------------
+# 建議（預設 _local_ = 只聽 loopback）。綁內網 IP；綁了非 loopback 位址就進入「正式模式」，bootstrap checks 全部強制執行
+network.host: 192.168.60.21
+# 建議（預設 9200-9300 = 從 9200 起找第一個可用的 port）。固定下來，避免同一台誤啟動第二個行程時悄悄綁到 9201
+http.port: 9200
+# 建議（預設 9300-9399）。同上，防火牆規則也比較好寫
+transport.port: 9300
+# 預設。單一 HTTP 請求（含 bulk）的上限，超過回 413；bulk 每批 5～15 MB 就夠了，不要調大
+http.max_content_length: 100mb
+# 預設（啟用 HTTPS 時預設 false）。TLS 上做壓縮有 BREACH 類攻擊的風險，維持關閉
+http.compression: false
+# 預設。節點之間只壓縮寫入資料（bulk 轉送給副本、復原），其他訊息不壓縮
+transport.compress: indexing_data
+# 預設
+transport.compression_scheme: lz4
+# 預設。TCP keepalive，搭配 OS 的 net.ipv4.tcp_keepalive_* 偵測半斷線的連線
+network.tcp.keep_alive: true
+# 預設（-1 = 用 OS 設定，Rocky 9 是 7200 秒）。前面有會切斷閒置連線的防火牆 / LB 時，設得比它的逾時短
+network.tcp.keep_idle: -1
+# 預設
+network.tcp.no_delay: true
+
+#------------------------------------------------------------------------------
+# 叢集組成（discovery）與故障偵測
+#------------------------------------------------------------------------------
+# 必要（預設空）。所有 master-eligible 節點的位址（port 預設 9300）。新節點靠它找到叢集
+discovery.seed_hosts: [ "esc1", "esc2", "esc3" ]
+# 必要，只在叢集「第一次」啟動時使用：列出初始的 master-eligible 節點（要和 node.name 相同）。
+# 叢集組成後一定要移除這一行（滾動重啟時拿掉），否則資料目錄被清空的節點可能自己 bootstrap 出新的叢集
+cluster.initial_master_nodes: [ "esc1", "esc2", "esc3" ]
+# 預設。master 每秒檢查每個節點一次
+cluster.fault_detection.follower_check.interval: 1s
+# 預設。單次檢查的逾時
+cluster.fault_detection.follower_check.timeout: 10s
+# 預設。連續失敗 3 次就把節點移出叢集（最長約 30 秒）；GC 暫停常常超過這個時間時，先解決 heap 問題，不要調大
+cluster.fault_detection.follower_check.retry_count: 3
+# 預設。其他節點檢查 master 是否還在
+cluster.fault_detection.leader_check.interval: 1s
+# 預設
+cluster.fault_detection.leader_check.timeout: 10s
+# 預設
+cluster.fault_detection.leader_check.retry_count: 3
+# 預設。master 發布一次叢集狀態的逾時；常常逾時代表叢集狀態太大（分片、欄位太多）
+cluster.publish.timeout: 30s
+# 預設。沒有 master 時拒絕寫入、仍允許讀取（all = 讀寫都拒絕）
+cluster.no_master_block: write
+# 預設。節點離開時自動調整投票組態，維持奇數個投票者
+cluster.auto_shrink_voting_configuration: true
+
+#------------------------------------------------------------------------------
+# 分片分配與復原（全部是動態）
+#------------------------------------------------------------------------------
+# 預設。all / primaries / new_primaries / none；滾動重啟時暫時改成 primaries
+cluster.routing.allocation.enable: all
+# 預設。always / indices_primaries_active / indices_all_active
+cluster.routing.allocation.allow_rebalance: always
+# 預設
+cluster.routing.rebalance.enable: all
+# 預設。整個叢集同時進行的分片搬移數
+cluster.routing.allocation.cluster_concurrent_rebalance: 2
+# 預設。每個節點同時進行的復原數（進、出各自計算）
+cluster.routing.allocation.node_concurrent_recoveries: 2
+# 預設。節點重啟後，每個節點同時從本機資料復原的主分片數
+cluster.routing.allocation.node_initial_primaries_recoveries: 4
+# 預設。同一台實體主機跑多個節點時才要改 true（避免主分片與副本落在同一台主機）
+cluster.routing.allocation.same_shard.host: false
+# 預設是不設定。跨 zone 時取消註解，配合 node.attr.zone
+#cluster.routing.allocation.awareness.attributes: [ zone ]
+# 預設（每個節點）。SSD + 10GbE 的環境，離峰時可以用 PUT _cluster/settings 暫時調到 200mb 加快復原 / 搬移
+indices.recovery.max_bytes_per_sec: 40mb
+# 預設。每個復原同時傳送的檔案區塊數
+indices.recovery.max_concurrent_file_chunks: 2
+# 預設。每個復原同時重播的 translog 操作批次數
+indices.recovery.max_concurrent_operations: 1
+# 預設。依 replica selection 選擇回應最快的分片副本處理搜尋
+cluster.routing.use_adaptive_replica_selection: true
+# 預設。每個非 frozen 的 data 節點最多 1000 個分片（含副本），超過就不能再建索引；碰到時應該減少分片，不要調高
+cluster.max_shards_per_node: 1000
+
+#------------------------------------------------------------------------------
+# 磁碟水位（全部是動態）
+#------------------------------------------------------------------------------
+# 預設
+cluster.routing.allocation.disk.threshold_enabled: true
+# 預設。超過就不再把「副本」分配到這個節點；告警要設在這之前（例如 80%）
+cluster.routing.allocation.disk.watermark.low: 85%
+# 預設。大磁碟時改用「剩餘空間」判斷：剩餘 200GB 以下才算超過低水位
+cluster.routing.allocation.disk.watermark.low.max_headroom: 200GB
+# 預設。超過就開始把分片搬離這個節點
+cluster.routing.allocation.disk.watermark.high: 90%
+# 預設
+cluster.routing.allocation.disk.watermark.high.max_headroom: 150GB
+# 預設。超過就把這個節點上的索引全部設成唯讀（read_only_allow_delete），寫入全部失敗
+cluster.routing.allocation.disk.watermark.flood_stage: 95%
+# 預設
+cluster.routing.allocation.disk.watermark.flood_stage.max_headroom: 100GB
+# 預設。多久收集一次各節點的磁碟用量
+cluster.info.update.interval: 30s
+
+#------------------------------------------------------------------------------
+# 寫入緩衝與背壓
+#------------------------------------------------------------------------------
+# 預設。所有分片共用的寫入緩衝區（heap 的比例），寫入非常重的節點可以調到 15%～20%，需重啟
+indices.memory.index_buffer_size: 10%
+# 預設
+indices.memory.min_index_buffer_size: 48mb
+# 預設（heap 的 10%）。正在處理中的寫入資料超過這個量就回 429，保護 heap，需重啟
+indexing_pressure.memory.limit: 10%
+
+#------------------------------------------------------------------------------
+# 快取
+#------------------------------------------------------------------------------
+# 預設（heap 的 10%）。filter 子句的結果快取，需重啟
+indices.queries.cache.size: 10%
+# 預設（heap 的 1%）。size: 0 的查詢（聚合）結果快取，refresh 後失效，需重啟
+indices.requests.cache.size: 1%
+# 建議（預設 -1 = 無上限，只受 fielddata 斷路器 40% 限制）。設上限讓舊的 fielddata 被淘汰，而不是讓查詢一直被斷路器拒絕；
+# 正確的做法是不要在 text 欄位上開 fielddata，這只是保險，需重啟
+indices.fielddata.cache.size: 20%
+
+#------------------------------------------------------------------------------
+# 斷路器（動態）
+#------------------------------------------------------------------------------
+# 預設。依 JVM 實際的 heap 用量判斷（需重啟才能改）
+indices.breaker.total.use_real_memory: true
+# 預設（use_real_memory 為 true 時是 95%）。所有斷路器加總的上限
+indices.breaker.total.limit: 95%
+# 預設
+indices.breaker.fielddata.limit: 40%
+# 預設。單一請求（聚合等）可用的 heap
+indices.breaker.request.limit: 60%
+# 預設。傳輸中的請求（HTTP、transport）可用的 heap
+network.breaker.inflight_requests.limit: 100%
+
+#------------------------------------------------------------------------------
+# 執行緒池（需重啟）
+#------------------------------------------------------------------------------
+# 執行緒數依 CPU 自動計算（write = CPU 數、search = CPU × 3 / 2 + 1），不要手動設 size。
+# 預設是偵測到的 CPU 數；容器限制了 CPU 而 JVM 偵測錯誤時才要設
+#node.processors: 8
+# 預設。佇列滿了回 429（rejected）；調大佇列只會讓延遲變高，不會增加處理能力
+thread_pool.write.queue_size: 10000
+# 預設（9.x；8.19 是 1000）
+thread_pool.search.queue_size: 16000
+
+#------------------------------------------------------------------------------
+# 搜尋保護（動態）
+#------------------------------------------------------------------------------
+# 預設。單一查詢的聚合 bucket 上限
+search.max_buckets: 65536
+# 預設（-1 = 不限制）。全域的查詢逾時；各查詢可以自己帶 timeout
+search.default_search_timeout: -1
+# 預設。改成 false 可以禁止 script 查詢、前置萬用字元、regexp 等昂貴的查詢（會影響 Kibana 部分功能）
+search.allow_expensive_queries: true
+# 預設。同時開著的 scroll context 上限；深分頁請改用 search_after + PIT
+search.max_open_scroll_context: 500
+# 預設。scroll / PIT 的 keep_alive 上限
+search.max_keep_alive: 24h
+
+#------------------------------------------------------------------------------
+# 操作保護、script（動態）
+#------------------------------------------------------------------------------
+# 預設。刪除索引時必須寫出完整名稱，不能用 * 或 _all
+action.destructive_requires_name: true
+# 預設。寫入不存在的索引時自動建立（data stream 需要）；不想讓打錯字的索引名稱被建立，就搭配 dynamic: strict 的範本
+action.auto_create_index: true
+# 預設。script 編譯速率上限，超過代表 script 沒有用參數化（每次都不同的 script 原始碼）
+script.max_compilations_rate: 150/5m
+# 預設
+script.cache.max_size: 3000
+
+#------------------------------------------------------------------------------
+# 內建功能
+#------------------------------------------------------------------------------
+# 建議（預設 true）。不會連外的環境關掉 GeoIP 資料庫自動下載，否則會持續記錄下載失敗；需要 GeoIP 時改回 true
+ingest.geoip.downloader.enabled: false
+# 預設（已棄用的內部收集）。監控改用 Elastic Agent / Metricbeat 送到另一個叢集
+xpack.monitoring.collection.enabled: false
+# 預設（9.x）。叢集狀態中的秘密資訊（例如 ES|QL 外部資料來源的憑證）一律加密；
+# 金鑰的保護密碼在 keystore（cluster.state.encryption.password.*），RPM 的 auto-config 會自動產生
+cluster.state.encryption.required: true
+
+#------------------------------------------------------------------------------
+# 安全性（TLS 憑證由自建 CA 簽發，見文章「步驟 1」）
+#------------------------------------------------------------------------------
+# 必要
+xpack.security.enabled: true
+# 必要（auto-config 會寫 true）。用 certutil 自建 CA 時不需要 enrollment token
+xpack.security.enrollment.enabled: false
+# 必要。節點之間的 TLS（多節點叢集不能關）
+xpack.security.transport.ssl.enabled: true
+# 必要（預設 full；auto-config 寫的是 certificate）。full = 驗證憑證鏈 + 主機名 / IP 要在 SAN 裡
+xpack.security.transport.ssl.verification_mode: full
+# 必要。路徑相對於 /etc/elasticsearch
+xpack.security.transport.ssl.key: certs/node.key
+# 必要
+xpack.security.transport.ssl.certificate: certs/node.crt
+# 必要
+xpack.security.transport.ssl.certificate_authorities: [ "certs/ca.crt" ]
+# 必要。HTTP 層的 TLS
+xpack.security.http.ssl.enabled: true
+# 必要
+xpack.security.http.ssl.key: certs/node.key
+# 必要
+xpack.security.http.ssl.certificate: certs/node.crt
+# 必要
+xpack.security.http.ssl.certificate_authorities: [ "certs/ca.crt" ]

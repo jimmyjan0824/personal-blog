@@ -1,0 +1,7 @@
+# /etc/elasticsearch/jvm.options.d/heap.options
+# 預設：不設定 -Xms / -Xmx，由 Elasticsearch 依節點角色與實體記憶體自動計算（官方建議多數情況使用自動值）。
+#   master + data 節點、16 GB RAM → 約 8 GB（實體記憶體的 50%），-Xms = -Xmx，上限約 31 GB（compressed oops）。
+#   其餘一半留給 OS page cache，Lucene 的 segment 靠它快取。
+# 需要手動指定時（例如同一台主機還跑別的服務），取消下面兩行的註解，兩個值一定要相同、不超過實體記憶體的 50%：
+# -Xms8g
+# -Xmx8g

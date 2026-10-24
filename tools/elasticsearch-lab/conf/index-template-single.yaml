@@ -1,0 +1,117 @@
+# PUT _component_template/base-settings（Content-Type: application/yaml，註解會被忽略）
+# 索引層級的效能與運維設定：elasticsearch.yml 不能放索引設定，統一用 component template 套到所有業務索引。
+# 以「單節點、業務資料（非日誌）、搜尋與寫入並重」為基準。
+# 標記規則和 elasticsearch.yml 相同：建議 = 調整過的值（括號內是預設值）；預設 = 9.5.5 的預設值
+# （在全新的 9.5.5 上用 GET <index>/_settings?include_defaults 逐一核對過）。
+# 「動態」表示建立後也可以 PUT <index>/_settings 修改；其他的只在建立索引時生效。
+version: 1
+_meta:
+  description: "base index settings for business indices (es-single)"
+template:
+  settings:
+    #--------------------------------------------------------------------------
+    # 分片與副本
+    #--------------------------------------------------------------------------
+    # 預設。主分片數建立後不能改（只能 split / shrink / reindex）；每個分片 10～50 GB，預估會超過再在建立時指定
+    index.number_of_shards: 1
+    # 建議（預設 1），動態。單節點放不了副本（副本不能和主分片在同一個節點），設 1 會讓叢集永遠是 yellow
+    index.number_of_replicas: 0
+    # 預設，動態。不要自動依節點數調整副本（auto_expand_replicas 會忽略部分分配規則）
+    index.auto_expand_replicas: false
+    # 預設，動態（-1 = 不限制）。熱點索引的分片擠在同一台時，設成「主分片數 × (1 + 副本數) ÷ 節點數」再加 1
+    index.routing.allocation.total_shards_per_node: -1
+    # 預設，動態。寫入前只要求主分片 active；設 all 會在副本不在時拒絕寫入（可用性下降）
+    index.write.wait_for_active_shards: 1
+    # 預設，動態。分片分配失敗的重試次數，用完要 POST _cluster/reroute?retry_failed=true
+    index.allocation.max_retries: 5
+
+    #--------------------------------------------------------------------------
+    # refresh 與 translog
+    #--------------------------------------------------------------------------
+    # 預設是不設定（= 1s，而且索引閒置 index.search.idle.after 後暫停 refresh，下一次搜尋時才 refresh）。
+    # 明確寫 1s 會關掉 search idle 的行為；日誌類資料建議 30s；大量匯入時暫時設 -1
+    #index.refresh_interval: 1s
+    # 預設，動態。沒設 refresh_interval 的索引，30 秒沒有搜尋就暫停定期 refresh
+    index.search.idle.after: 30s
+    # 預設，動態。每個寫入請求回應前都把 translog fsync 到磁碟；async 會在當機時遺失最多 sync_interval 的資料
+    index.translog.durability: request
+    # 預設，動態。durability 為 async 時的 fsync 間隔（也是 request 模式下背景 fsync 的間隔）
+    index.translog.sync_interval: 5s
+    # 預設，動態。translog 累積到這個大小就 flush（Lucene commit）
+    index.translog.flush_threshold_size: 10gb
+    # 預設，動態。距離上次 flush 超過這個時間也會 flush
+    index.translog.flush_threshold_age: 1m
+
+    #--------------------------------------------------------------------------
+    # merge 與儲存（9.x 調整過 merge policy 的預設值，8.19 的值見文章）
+    #--------------------------------------------------------------------------
+    # 預設。default = LZ4；日誌、歸檔類索引建議 best_compression（DEFLATE，省 15%～25% 空間、寫入稍慢），建立時才能設
+    index.codec: default
+    # 預設，動態。小於這個大小的 segment 一律視為這個大小來挑選合併對象（8.19 是 2mb）
+    index.merge.policy.floor_segment: 16mb
+    # 預設，動態。每一層允許的 segment 數（8.19 是 10.0）
+    index.merge.policy.segments_per_tier: 8.0
+    # 預設，動態。一次合併最多幾個 segment（8.19 是 10）
+    index.merge.policy.max_merge_at_once: 16
+    # 預設，動態。已刪除文件超過 segment 的 20% 時優先合併
+    index.merge.policy.deletes_pct_allowed: 20.0
+    # 預設，動態。merge 太多時自動降低寫入的 merge 速度，避免 I/O 被 merge 吃光
+    index.merge.scheduler.auto_throttle: true
+    # 預設。啟動時不檢查分片檔案（checksum 會讓大分片啟動很慢；懷疑損毀時才暫時設 checksum）
+    index.shard.check_on_startup: false
+
+    #--------------------------------------------------------------------------
+    # mapping 保護（動態）
+    #--------------------------------------------------------------------------
+    # 預設。欄位總數上限（含 multi-field、object）；超過代表 mapping 設計有問題（mapping explosion），不要隨便調高
+    index.mapping.total_fields.limit: 1000
+    # 預設。物件巢狀深度上限
+    index.mapping.depth.limit: 20
+    # 預設（9.x；8.19 是 50）。nested 欄位數上限
+    index.mapping.nested_fields.limit: 100
+    # 預設。單一文件中 nested 物件總數上限
+    index.mapping.nested_objects.limit: 10000
+    # 預設。不自動轉型（"5" 不會被當成數字 5 寫進 integer 欄位）
+    index.mapping.coerce: false
+    # 預設。格式錯誤的值讓整份文件寫入失敗，而不是悄悄忽略
+    index.mapping.ignore_malformed: false
+
+    #--------------------------------------------------------------------------
+    # 查詢保護與快取（動態）
+    #--------------------------------------------------------------------------
+    # 預設。from + size 的上限；深分頁用 search_after + PIT，不要調高
+    index.max_result_window: 10000
+    # 預設。inner_hits、top_hits 的 from + size 上限
+    index.max_inner_result_window: 100
+    # 預設。terms 查詢的詞數上限
+    index.max_terms_count: 65536
+    # 預設。regexp 查詢的長度上限
+    index.max_regex_length: 1000
+    # 預設。refresh=wait_for 同時等待的請求上限，超過的請求會被強制 refresh
+    index.max_refresh_listeners: 1000
+    # 預設。node query cache（filter 結果）
+    index.queries.cache.enabled: true
+    # 預設。shard request cache（size: 0 的聚合結果）
+    index.requests.cache.enable: true
+
+    #--------------------------------------------------------------------------
+    # 慢日誌（預設全部 -1 = 關閉；寫到 /var/log/elasticsearch/<cluster.name>_index_*_slowlog.json）
+    #--------------------------------------------------------------------------
+    # 建議（預設 -1），動態。查詢階段超過 5 秒記 WARN
+    index.search.slowlog.threshold.query.warn: 5s
+    # 建議（預設 -1），動態
+    index.search.slowlog.threshold.query.info: 2s
+    # 建議（預設 -1），動態。fetch 階段（取回 _source）
+    index.search.slowlog.threshold.fetch.warn: 1s
+    # 建議（預設 -1），動態
+    index.search.slowlog.threshold.fetch.info: 500ms
+    # 建議（預設 false），動態。記錄是哪個使用者 / API key 發出的查詢
+    index.search.slowlog.include.user: true
+    # 建議（預設 -1），動態
+    index.indexing.slowlog.threshold.index.warn: 5s
+    # 建議（預設 -1），動態
+    index.indexing.slowlog.threshold.index.info: 2s
+    # 預設，動態。慢寫入日誌記錄 _source 的前 1000 個字元
+    index.indexing.slowlog.source: 1000
+    # 建議（預設 false），動態
+    index.indexing.slowlog.include.user: true

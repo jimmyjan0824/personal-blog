@@ -1,0 +1,10 @@
+# /etc/yum.repos.d/elasticsearch.repo（Elastic 官方 RPM 套件庫，9.x）
+# enabled=0：平常 dnf update 不會動到 Elasticsearch，安裝 / 升級時才用 --enablerepo=elasticsearch 明確指定
+[elasticsearch]
+name=Elasticsearch repository for 9.x packages
+baseurl=https://artifacts.elastic.co/packages/9.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=0
+autorefresh=1
+type=rpm-md
