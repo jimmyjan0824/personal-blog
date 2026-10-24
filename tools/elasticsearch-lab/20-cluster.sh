@@ -64,7 +64,8 @@ for i in $(seq 1 120); do case "$(nodes_seen $O)" in *$V*) sleep 1;; *) echo "$(
 x $O "grep -E 'node-left|followers check|$V' $LOG | cut -c1-400 | tail -4"
 e $O GET '/_cluster/health?filter_path=status,number_of_nodes,active_primary_shards,active_shards,unassigned_shards,delayed_unassigned_shards'
 e $O GET '/_cat/shards/orders?v&h=index,shard,prirep,state,node,unassigned.reason&s=shard,prirep'
-e $O GET '/_cluster/allocation/explain?filter_path=index,shard,primary,current_state,unassigned_info.reason,unassigned_info.delayed,allocate_explanation,configured_delay_in_millis,remaining_delay_in_millis&pretty' '{"index":"orders","shard":0,"primary":false}'
+US=$(eq $O GET '/_cat/shards/orders?h=shard,prirep,state' | awk '$2=="r" && $3=="UNASSIGNED" {print $1; exit}')
+e $O GET '/_cluster/allocation/explain?filter_path=index,shard,primary,current_state,unassigned_info.reason,unassigned_info.delayed,allocate_explanation,configured_delay_in_millis,remaining_delay_in_millis&pretty' "{\"index\":\"orders\",\"shard\":${US:-0},\"primary\":false}"
 e $O POST '/orders/_doc?refresh=wait_for&filter_path=result,_shards' '{"order_id":"ORD-DURING-T1","status":"paid","amount":1,"created_at":"2026-10-24T08:00:00Z"}'
 e $O GET '/orders/_count'
 T1=$(date +%s); h "docker compose unpause $V"
