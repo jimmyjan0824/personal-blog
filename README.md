@@ -19,7 +19,7 @@ tags: [mysql, index, innodb]     # 標籤建議用小寫
 內文從這裡開始……
 ```
 
-建議的主分類：`MySQL`、`PostgreSQL`、`資料庫比較`、`SQL`、`維運`。
+建議的主分類：`MySQL`、`PostgreSQL`、`MongoDB`、`Redis`、`資料庫比較`、`SQL`、`維運`。
 
 推送到 `main` 分支後，GitHub Actions 會自動建置並部署。
 
