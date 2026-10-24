@@ -98,7 +98,10 @@ dnf 安裝的 `/etc/my.cnf` 沒有 `!includedir /etc/my.cnf.d`，**先補上**�
 grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf
 ```
 
-效能與運維的基礎設定（buffer pool、redo log、I/O、連線、慢查詢日誌等）請直接沿用 [GTID 篇步驟 2-2]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 的 `/etc/my.cnf.d/00-server.cnf`，三台都放同一份。實測套用這份設定後，叢集建立與資料同步都正常。下面的 `ic.cnf` 只放本篇需要的設定。
+效能與運維的基礎設定（buffer pool、redo log、I/O、連線、慢查詢日誌等）請直接沿用 [GTID 篇步驟 2-2]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 的 `/etc/my.cnf.d/00-server.cnf`，三台都放同一份。實測套用這份設定（buffer pool 10G、redo 2G）後，叢集建立與資料同步都正常。下面的 `ic.cnf` 只放本篇需要的設定。
+
+> 實驗用的 Docker 主機只有約 7.7 GB 記憶體，三台各設 10G buffer pool 仍能啟動，是因為 InnoDB 的 buffer pool 用到才配置實體記憶體：實測每台 `mysqld` 虛擬記憶體約 12.4 GB，實際佔用（RSS）只有 1.4~1.9 GB。這只代表設定會被接受、叢集功能正常；資料量一大就會 OOM。**記憶體較小的實驗機請依 GTID 篇的對照表調小 buffer pool。**
+{: .prompt-warning }
 
 GTID、binlog 這些設定交給 `dba.configureInstance()` 處理，設定檔只放每台不同的東西：
 
@@ -273,6 +276,18 @@ The instance 'db2:3306' was successfully added to the cluster.
 ```
 
 Clone 會把 `db1` 的資料整份複製過來（包含上一篇要手動處理的 GTID 狀態與使用者帳號），然後自動重啟 `db2`。不用 `mysqldump`，也不用 `RESET MASTER`。
+
+> `createCluster` 與 `addInstance` 期間，錯誤日誌會出現幾行看起來很嚇人的 `[ERROR]`，例如：
+>
+> ```console
+> [ERROR] [MY-013117] [Repl] Replica I/O for channel 'mysqlsh.test': Fatal error: The replica I/O thread stops because source and replica have equal MySQL server ids; ...
+> [ERROR] [MY-013120] [Repl] Replica I/O for channel 'mysqlsh.test': Source command COM_REGISTER_REPLICA failed: Access denied for user 'mysqlsh.test'@'%' (using password: YES) (Errno: 1045) ...
+> [ERROR] [MY-011685] [Repl] Plugin group_replication reported: 'The group_replication_group_name option is mandatory'
+> [ERROR] [MY-011660] [Repl] Plugin group_replication reported: 'Unable to start Group Replication on boot'
+> ```
+>
+> 前兩行來自 MySQL Shell 自己建立的 `mysqlsh.test` 測試通道（檢查複製連線後就刪掉），後兩行是外掛剛載入、群組名稱還沒設定時的訊息，都是正常現象。實測在沒有套用 00-server.cnf 的全新節點上做同樣操作，也會出現完全相同的錯誤，和效能設定無關。
+{: .prompt-info }
 
 ## 步驟 6：查看叢集狀態
 
@@ -560,6 +575,16 @@ The Cluster was successfully rebooted.
 
 `cluster.status()` 的 `statusText` 回到 `Cluster is ONLINE and can tolerate up to ONE failure.`。
 
+> `rebootClusterFromCompleteOutage()` 實測要等**約 1 分鐘**才完成。原因是三台開機後都設了 `group_replication_start_on_boot = ON`，會先嘗試加入一個已經不存在的群組，Shell 要等這個嘗試逾時（`[ERROR] [MY-011640] ... 'Timeout on wait for view after joining group'`）。輸出中的 `NOTE: The instance 'db1:3306' is running auto-rejoin process, which will be cancelled.` 指的就是這件事。
+>
+> 這段時間每台的錯誤日誌會灌進幾百行類似下面的 `[ERROR]`（實測每台約 420 行），內容都是節點互相連不到群組，全叢集停機時屬於預期行為：
+>
+> ```console
+> [ERROR] [MY-011735] [Repl] Plugin group_replication reported: '[GCS] Error on opening a connection to peer node db2:3306 when joining a group. My local port is: 3306.'
+> [ERROR] [MY-013780] [Repl] Plugin group_replication reported: 'Failed to establish MySQL client connection in Group Replication. Error establishing connection. ...'
+> ```
+{: .prompt-info }
+
 **新的 Primary 不一定是原本那台。** 在另一個環境改成 db1 → db2 → db3 的順序停機，db3 最後停、GTID 最多，Shell 就自動改用 db3 當 seed：
 
 ```console
@@ -618,6 +643,8 @@ The Cluster was successfully rebooted.
 | 9 | 停掉 Primary，同時每秒經 6446 寫入 | 寫入自動改到新 Primary | ✅ 有一次 `ERROR 2013` | ✅ |
 | 10 | 舊 Primary 重新啟動、`setPrimaryInstance()` | 自動以 Secondary 加回；切換成功且 Router 跟上 | ✅ | ✅ |
 | 11 | 三台全停再啟動，`rebootClusterFromCompleteOutage()` | 三台回到 `ONLINE` | ✅ seed 為 db3 | ✅ seed 為 db1 |
+
+**套用 00-server.cnf 後再驗證一次**：GTID 篇補上完整的效能設定後，在環境 A 從全新主機依本篇步驟 0~11（含 Router）全部重跑。三台都套用 buffer pool 10G / 8 instances / redo 2G，全部步驟通過，輸出與文中一致：Clone 約 77 MB / 1 秒、Router 讀寫分流正常、切換瞬間同樣出現一次 `ERROR 2013`、`rebootClusterFromCompleteOutage()` 以 db1 為 seed 恢復。`configureInstance` 用 `SET PERSIST` 調整的參數沒有蓋掉 00-server.cnf 的值；`clusteradmin@'%'`、Router 自動建立的帳號與 `app@'%'` 在 `skip_name_resolve = ON` 下都能正常連線。錯誤日誌的 `[ERROR]` 只有上面兩個提示框說明的兩類，沒有 InnoDB、記憶體或啟動失敗相關的錯誤，也沒有 OOM。
 
 **錯誤處理紀錄**：
 
