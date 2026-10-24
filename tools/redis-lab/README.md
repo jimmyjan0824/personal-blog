@@ -7,6 +7,7 @@
 ./10-standalone.sh   # redis1
 ./20-sentinel.sh     # rs1~rs3
 ./30-cluster.sh      # rc1~rc6
+./40-extra.sh        # 補充驗證：行尾註解、RDB 還原陷阱、8.10.2 Cluster 警告
 docker compose down  # 清除
 ```
 
