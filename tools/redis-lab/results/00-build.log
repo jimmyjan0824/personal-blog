@@ -1,0 +1,54 @@
+
+======== docker build rocky9-base ========  (2026-10-24 14:20:16)
+#6 exporting manifest list sha256:62fc4dbdfef1fb3e68fb6125c4c8ff2f1adb637f2aafabe1ba734384857dbeb5 done
+#6 naming to docker.io/library/rocky9-base:latest done
+#6 unpacking to docker.io/library/rocky9-base:latest
+#6 unpacking to docker.io/library/rocky9-base:latest 0.2s done
+#6 DONE 0.9s
+
+======== docker build rocky9-redis74 ========  (2026-10-24 14:20:40)
+#5 35.69     [34mCC[0m [33mlogreqres.o[0m
+#5 35.70     [34mCC[0m [33mredis-cli.o[0m
+#5 35.70     [34mCC[0m [33mredisassert.o[0m
+#5 35.71     [34mCC[0m [33mcli_common.o[0m
+#5 35.72     [34mCC[0m [33mcli_commands.o[0m
+#5 35.74     [34mCC[0m [33mredis-benchmark.o[0m
+#5 35.82     [34;1mLINK[0m [37;1mredis-server[0m
+#5 35.84     [34;1mLINK[0m [37;1mredis-benchmark[0m
+#5 36.02     [34;1mLINK[0m [37;1mredis-cli[0m
+#5 40.95     [34;1mINSTALL[0m [37;1mredis-sentinel[0m
+#5 40.95     [34;1mINSTALL[0m [37;1mredis-check-rdb[0m
+#5 40.95     [34;1mINSTALL[0m [37;1mredis-check-aof[0m
+#5 40.96 
+#5 40.96 Hint: It's a good idea to run 'make test' ;)
+#5 40.96 
+#5 40.96 make[1]: Leaving directory '/usr/local/src/redis-7.4.11/src'
+#5 40.96 cd src && make install
+#5 40.96 make[1]: Entering directory '/usr/local/src/redis-7.4.11/src'
+#5 41.00     [34mCC[0m [33mMakefile.dep[0m
+#5 42.05 
+#5 42.05 Hint: It's a good idea to run 'make test' ;)
+#5 42.05 
+#5 42.05     [34;1mINSTALL[0m [37;1mredis-server[0m
+#5 42.06     [34;1mINSTALL[0m [37;1mredis-benchmark[0m
+#5 42.06     [34;1mINSTALL[0m [37;1mredis-cli[0m
+#5 42.06 make[1]: Leaving directory '/usr/local/src/redis-7.4.11/src'
+#5 42.12 25 files removed
+#5 DONE 42.3s
+
+#6 exporting to image
+#6 exporting layers
+#6 exporting layers 7.6s done
+#6 exporting manifest sha256:c692053cd90d701d8363431251726c10ebb50f110c910d0bb44a8cd4b5df69a2 done
+#6 exporting config sha256:eacb0dde8cb3aa9752da713980e951fb4b9b6e9b06b7cbf75907ad0308501083 done
+#6 exporting attestation manifest sha256:20f243749f2e6577ffe02147aeb7d5139938f88a04fa9313853d7ce597bac0fd done
+#6 exporting manifest list sha256:77d8a9888c9478d4a09b15e2ff498f49808e79794d4cd3ccbf7a6f94efdf229c done
+#6 naming to docker.io/library/rocky9-redis74:latest done
+#6 unpacking to docker.io/library/rocky9-redis74:latest
+#6 unpacking to docker.io/library/rocky9-redis74:latest 1.1s done
+#6 DONE 8.7s
+
+real	0m51.199s
+user	0m0.168s
+sys	0m0.142s
+Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=b6219fdaf4deedf5

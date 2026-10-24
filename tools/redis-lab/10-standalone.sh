@@ -19,13 +19,13 @@ x redis1 'cd /usr/local/src/redis-7.4.11 && make install 2>&1 | tail -8'
 x redis1 'ls /usr/local/bin/redis-*; redis-server --version; ldd /usr/local/bin/redis-server | grep systemd'
 
 note "預設值：不帶設定檔啟動 7.4.11，匯出 CONFIG GET *"
-x redis1 'redis-server --port 7777 --daemonize yes --logfile /tmp/def.log >/dev/null; sleep 1; REDISCLI_AUTH= redis-cli -p 7777 config get "*" | paste - - | sort > /tmp/defaults-7.4.11.txt; REDISCLI_AUTH= redis-cli -p 7777 shutdown nosave; wc -l /tmp/defaults-7.4.11.txt'
+x redis1 'redis-server --port 7777 --daemonize yes --logfile /tmp/def.log >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 7777 config get "*" | paste - - | sort > /tmp/defaults-7.4.11.txt; env -u REDISCLI_AUTH redis-cli -p 7777 shutdown nosave; wc -l /tmp/defaults-7.4.11.txt'
 docker compose exec -T redis1 cat /tmp/defaults-7.4.11.txt > results/defaults-7.4.11.txt
 note "對照：編譯 8.10.2（不安裝），匯出預設值"
-x redis1 'cd /usr/local/src && curl -fsSLO https://download.redis.io/releases/redis-8.10.2.tar.gz && tar xzf redis-8.10.2.tar.gz && cd redis-8.10.2 && make -j"$(nproc)" USE_SYSTEMD=yes >/tmp/make810.log 2>&1; echo rc=$?; tail -3 /tmp/make810.log; src/redis-server --version'
-x redis1 '/usr/local/src/redis-8.10.2/src/redis-server --port 7778 --daemonize yes --logfile /tmp/def8.log >/dev/null; sleep 1; REDISCLI_AUTH= redis-cli -p 7778 config get "*" | paste - - | sort > /tmp/defaults-8.10.2.txt; REDISCLI_AUTH= redis-cli -p 7778 shutdown nosave; wc -l /tmp/defaults-8.10.2.txt'
+x redis1 'cd /usr/local/src && curl -fsSLO https://download.redis.io/releases/redis-8.10.2.tar.gz && tar xzf redis-8.10.2.tar.gz && cd redis-8.10.2 && make -j"$(nproc)" USE_SYSTEMD=yes build redis >/tmp/make810.log 2>&1; echo rc=$?; tail -3 /tmp/make810.log; src/redis-server --version'
+x redis1 '/usr/local/src/redis-8.10.2/src/redis-server --port 7778 --daemonize yes --logfile /tmp/def8.log >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 7778 config get "*" | paste - - | sort > /tmp/defaults-8.10.2.txt; env -u REDISCLI_AUTH redis-cli -p 7778 shutdown nosave; wc -l /tmp/defaults-8.10.2.txt'
 docker compose exec -T redis1 cat /tmp/defaults-8.10.2.txt > results/defaults-8.10.2.txt
-docker compose exec -T redis1 bash -c 'cd /usr/local/src && grep -Ev "^\s*(#|$)" redis-7.4.11/redis.conf > /tmp/a; grep -Ev "^\s*(#|$)" redis-8.10.2/redis.conf > /tmp/b; diff /tmp/a /tmp/b' > results/redis.conf-template-diff.txt
+docker compose exec -T redis1 bash -c 'command -v diff >/dev/null || dnf install -y -q diffutils >/dev/null 2>&1; cd /usr/local/src && grep -Ev "^\s*(#|$)" redis-7.4.11/redis.conf > /tmp/a; grep -Ev "^\s*(#|$)" redis-8.10.2/redis.conf > /tmp/b; diff /tmp/a /tmp/b' > results/redis.conf-template-diff.txt
 
 note "步驟 2：使用者與目錄"
 x redis1 'groupadd -r redis && useradd -r -g redis -s /sbin/nologin -d /var/lib/redis -c "Redis Server" redis && id redis'
@@ -45,15 +45,15 @@ x redis1 'redis-cli config get maxmemory; redis-cli config get maxmemory-policy;
 x redis1 'cat /proc/$(pidof redis-server)/limits | grep "open files"; redis-cli config get maxclients'
 note "設定檔 vs 實際值比對（只印出不同的）"
 cmpconf redis1 /etc/redis/redis.conf
-x redis1 'REDISCLI_AUTH= redis-cli ping; redis-cli -h 192.168.58.11 ping'
-x redis1 'redis-cli set user:1001:name Jimmy EX 3600; redis-cli get user:1001:name; redis-cli debug populate 100000 key 100 >/dev/null; redis-cli dbsize; redis-cli info memory | grep -E "used_memory_human|maxmemory_human|maxmemory_policy|mem_fragmentation_ratio|mem_allocator"'
+x redis1 'env -u REDISCLI_AUTH redis-cli ping; redis-cli -h 192.168.58.11 ping'
+x redis1 'redis-cli set user:1001:name Jimmy EX 3600; redis-cli get user:1001:name; seq 1 100000 | awk "{printf \"SET key:%d %0100d\\n\", \$1, \$1}" | redis-cli >/dev/null; redis-cli dbsize; redis-cli info memory | grep -E "used_memory_human|maxmemory_human|maxmemory_policy|mem_fragmentation_ratio|mem_allocator"'
 x redis1 'redis-cli info persistence | grep -E "aof_enabled|aof_rewrite_in_progress|rdb_last_bgsave_status|aof_last_write_status"; ls -l /var/lib/redis /var/lib/redis/appendonlydir'
 note "重啟後資料仍在（AOF）"
 x redis1 'systemctl restart redis && sleep 2 && redis-cli dbsize && redis-cli get user:1001:name && grep -E "DB loaded|Ready to accept" /var/log/redis/redis.log | tail -3'
 note "慢查詢與延遲監控"
-x redis1 'redis-cli debug sleep 0.2; redis-cli latency latest; redis-cli slowlog get 1'
+x redis1 'redis-cli eval "for i=1,150000000 do end return 1" 0; redis-cli latency latest; redis-cli slowlog get 1'
 note "錯誤日誌中的 WARNING"
 x redis1 'grep -E "WARNING|# " /var/log/redis/redis.log || echo "(no warnings)"'
 note "redis-benchmark（容器內，僅確認服務正常，不代表正式主機效能）"
-x redis1 'redis-benchmark -h 127.0.0.1 -a ChangeMe_Redis_2026 -q -n 100000 -c 50 -t set,get --threads 2 2>&1 | grep -v Warning'
+x redis1 'redis-benchmark -h 127.0.0.1 -a ChangeMe_Redis_2026 -q -n 100000 -c 50 -t set,get --threads 2 2>&1 | tr "\\r" "\\n" | grep "requests per second"'
 } 2>&1 | tee results/10-standalone.log

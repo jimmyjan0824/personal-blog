@@ -4,7 +4,19 @@ source "$(dirname "$0")/lib.sh"
 N="rs1 rs2 rs3"
 docker compose rm -sf $N >/dev/null 2>&1; docker compose up -d $N; sleep 5
 ip() { case $1 in rs1) echo 192.168.58.21;; rs2) echo 192.168.58.22;; rs3) echo 192.168.58.23;; esac; }
-master() { docker compose exec -T rs3 redis-cli -p 26379 sentinel get-master-addr-by-name mymaster 2>/dev/null | head -1; }
+# 等到條件成立（最多 max 秒），印出等了幾秒；取代固定 sleep
+wait_until() {
+  local n=$1 cond=$2 max=${3:-60} t0=$(date +%s)
+  for i in $(seq 1 $max); do
+    if docker compose exec -T $n bash -c "export REDISCLI_AUTH=ChangeMe_Redis_2026; $cond" >/dev/null 2>&1; then
+      echo "$(date '+%T') [$n] 條件成立：$cond（等了 $(( $(date +%s)-t0 )) 秒）"; return 0
+    fi
+    sleep 1
+  done
+  echo "$(date '+%T') [$n] 逾時 ${max} 秒：$cond"; return 1
+}
+# 問任一台還有回應的 Sentinel（被 pause 的節點 exec 會失敗，換下一台）
+master() { local n m; for n in $N; do m=$(docker compose exec -T $n redis-cli -p 26379 sentinel get-master-addr-by-name mymaster 2>/dev/null | head -1); [ -n "$m" ] && { echo "$m"; return; }; done; }
 {
 note "環境"
 x rs1 'cat /etc/rocky-release; redis-server --version'
@@ -55,7 +67,7 @@ x rs3 'redis-cli get order:1; redis-cli set should:fail 1'
 
 note "測試 1：計畫內切換 SENTINEL FAILOVER"
 x rs1 'redis-cli -p 26379 sentinel failover mymaster'
-sleep 8
+wait_until rs1 'redis-cli info replication | grep -q "^master_link_status:up"' 60
 x rs1 'redis-cli -p 26379 sentinel get-master-addr-by-name mymaster'
 x rs1 'grep -E "\+(try-failover|elected-leader|selected-slave|promoted-slave|switch-master|failover-end|convert-to-slave)" /var/log/redis/sentinel.log | tail -8'
 x rs1 'redis-cli info replication | head -5'
@@ -75,8 +87,11 @@ done
 x $OBS 'grep -E "\+(sdown|odown|try-failover|elected-leader|selected-slave|promoted-slave|switch-master|failover-end)" /var/log/redis/sentinel.log | tail -9'
 NM=$(master); NMN=$(for n in $N; do [ "$(ip $n)" = "$NM" ] && echo $n; done)
 x $NMN 'redis-cli get before:crash; redis-cli set after:crash 1; redis-cli info replication | head -4'
+wait_until $NMN 'redis-cli info replication | grep -q "^min_slaves_good_slaves:[1-9]"' 60
+x $NMN 'redis-cli set after:crash 1; redis-cli info replication | head -4'
 note "舊主庫恢復"
-echo "$(date '+%T') docker compose unpause $MN"; docker compose unpause $MN; sleep 12
+echo "$(date '+%T') docker compose unpause $MN"; docker compose unpause $MN
+wait_until $MN 'redis-cli info replication | grep -q "^master_link_status:up"' 60
 x $MN 'redis-cli info replication | head -6; redis-cli get after:crash'
 x $OBS 'grep -E "convert-to-slave|\-sdown" /var/log/redis/sentinel.log | tail -3'
 

@@ -1,0 +1,18 @@
+49a50,51
+> backupdirname "backupdir"
+> backup-sealed-ttl 0
+55a58,62
+> hash-min-template-entries 0
+> hash-max-template-entries 0
+> hash-rdb-load-min-template-entries 0
+> hash-rdb-load-max-template-entries 0
+> hash-rdb-load-template-disassembly-threshold 0
+65a73,75
+> array-slice-size 4096
+> array-sparse-kmax 10
+> array-sparse-kmin 5
+74a85,88
+> loadmodule ./modules/redisbloom/redisbloom.so
+> loadmodule ./modules/redisearch/redisearch.so
+> loadmodule ./modules/redisjson/rejson.so
+> loadmodule ./modules/redistimeseries/redistimeseries.so
