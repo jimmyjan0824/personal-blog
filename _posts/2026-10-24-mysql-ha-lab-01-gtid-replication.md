@@ -118,28 +118,152 @@ grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cn
 > Percona 官方 Docker 映像的 `/etc/my.cnf` 有這一行（是映像自己加的），所以只用官方映像測試的話不會發現。另一個做法是把設定直接寫進 `/etc/my.cnf` 的 `[mysqld]` 區段。
 {: .prompt-danger }
 
-### 2-2. 複製設定檔
+### 2-2. 效能與運維基礎設定
+
+這份設定和複製無關，但每台 MySQL 都應該有，本系列其他篇也共用同一份。基準是「**16 GB RAM、8 vCPU、SSD、專用資料庫主機**」。註解標「建議」的是調整過的值；標「預設」的是 8.0.46 的預設值（在全新安裝的 Percona 8.0.46 上用 `performance_schema.global_variables` 逐一查過），寫出來是為了讓設定一目了然，日後要調整時知道從哪裡開始。
+
+```ini
+# /etc/my.cnf.d/00-server.cnf
+# 效能與運維基礎設定（Percona Server for MySQL 8.0.46）
+# 以「16 GB RAM、8 vCPU、SSD、專用資料庫主機」為基準。
+# 標「建議」的是調整過的值；標「預設」的是 8.0.46 的預設值，寫出來是為了讓設定一目了然。
+[mysqld]
+
+# ==================== 基本 ====================
+character_set_server      = utf8mb4             # 預設。8.0 起預設就是 utf8mb4
+collation_server          = utf8mb4_0900_ai_ci  # 預設
+lower_case_table_names    = 0                   # 預設。只能在初始化資料目錄前決定，之後不能改
+log_timestamps            = SYSTEM              # 建議（預設 UTC）。錯誤日誌改用主機時區，對照系統日誌比較方便
+skip_name_resolve         = ON                  # 建議（預設 OFF）。不做 DNS 反查，避免 DNS 慢或故障拖垮連線；帳號的 host 要用 IP 或網段
+sql_mode                  = ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION  # 預設，維持嚴格模式
+
+# ==================== 連線 ====================
+max_connections           = 500                 # 建議（預設 151）。依應用程式連線池總數 ×1.2 估算，不是越大越好，每條連線都會吃記憶體
+max_connect_errors        = 100000              # 建議（預設 100）。避免網路抖動或健康檢查讓某台應用主機被封鎖（Host is blocked）
+thread_cache_size         = 64                  # 建議（預設自動算出 9）。重複使用執行緒，降低短連線建立成本
+wait_timeout              = 28800               # 預設（8 小時）。要比連線池的 maxLifetime 長，否則應用會拿到已被斷開的連線
+interactive_timeout       = 28800               # 預設
+max_allowed_packet        = 64M                 # 預設。從庫要大於等於主庫，否則大交易複製會中斷
+# thread_handling         = pool-of-threads     # Percona 執行緒池（預設 one-thread-per-connection）。連線數上千時再考慮開啟
+
+# ==================== 表快取 ====================
+table_open_cache          = 4000                # 預設。Opened_tables 持續增加時再調大
+table_definition_cache    = 2000                # 預設
+table_open_cache_instances = 16                 # 預設
+# open_files_limit 受 systemd 的 LimitNOFILE（Percona RPM 設為 10000）限制，表很多時用 systemctl edit mysqld 調高
+
+# ==================== 每條連線的緩衝區 ====================
+# 每條連線（甚至每個查詢）各自配置，設太大在連線多時會吃光記憶體。維持預設，個別慢查詢用 SET SESSION 調整
+sort_buffer_size          = 256K                # 預設
+join_buffer_size          = 256K                # 預設
+read_buffer_size          = 128K                # 預設
+read_rnd_buffer_size      = 256K                # 預設
+
+# ==================== 記憶體內暫存表 ====================
+tmp_table_size            = 64M                 # 建議（預設 16M）。GROUP BY / ORDER BY 的暫存表超過此值會轉到磁碟
+max_heap_table_size       = 64M                 # 建議（預設 16M）。和 tmp_table_size 設一樣
+temptable_max_ram         = 1G                  # 預設。TempTable 引擎所有暫存表合計可用的記憶體上限
+
+# ==================== InnoDB：記憶體 ====================
+innodb_buffer_pool_size   = 10G                 # 建議（預設 128M）。專用主機設實體記憶體的 60~70%，這是影響效能最大的參數
+innodb_buffer_pool_instances = 8                # 建議（預設：buffer pool < 1G 時為 1）。降低 buffer pool mutex 競爭
+innodb_buffer_pool_dump_at_shutdown = ON        # 預設。關機時記錄熱資料頁
+innodb_buffer_pool_load_at_startup  = ON        # 預設。開機後自動預熱，重啟後效能恢復較快
+innodb_log_buffer_size    = 64M                 # 建議（預設 16M）。大交易或寫入量大時減少 redo 寫盤次數
+
+# ==================== InnoDB：Redo log 與落盤 ====================
+innodb_redo_log_capacity  = 2G                  # 建議（預設 100M）。太小會頻繁 checkpoint 造成寫入卡頓；約抓尖峰 1 小時的 redo 量
+innodb_flush_log_at_trx_commit = 1              # 預設。每次 commit 都落盤，HA 環境必須是 1，否則主庫當機會遺失交易
+innodb_flush_method       = O_DIRECT            # 建議（預設 fsync）。資料檔繞過 OS cache，避免和 buffer pool 重複快取
+innodb_use_fdatasync      = ON                  # 建議（預設 OFF）。用 fdatasync 取代 fsync，少一次 metadata 寫入
+innodb_doublewrite        = ON                  # 預設。防止寫到一半的資料頁損毀，不要關
+
+# ==================== InnoDB：I/O ====================
+innodb_io_capacity        = 2000                # 建議（預設 200）。背景刷髒頁的 IOPS，SSD 設 2000 左右，傳統硬碟維持 200
+innodb_io_capacity_max    = 4000                # 建議（預設 2000）。刷髒頁落後時的上限，約為 io_capacity 的 2 倍
+innodb_flush_neighbors    = 0                   # 預設。SSD 不需要順便刷相鄰頁
+innodb_read_io_threads    = 4                   # 預設
+innodb_write_io_threads   = 4                   # 預設
+innodb_page_cleaners      = 4                   # 預設（實際值不超過 buffer_pool_instances）
+innodb_purge_threads      = 4                   # 預設
+innodb_lru_scan_depth     = 1024                # 預設
+
+# ==================== InnoDB：交易、鎖與其他 ====================
+innodb_file_per_table     = ON                  # 預設。每張表一個 .ibd，DROP / TRUNCATE 才能釋放空間
+innodb_open_files         = 4000                # 預設
+innodb_lock_wait_timeout  = 50                  # 預設（秒）。OLTP 可依應用調低，讓鎖等待早點失敗
+innodb_deadlock_detect    = ON                  # 預設
+innodb_print_all_deadlocks = ON                 # 建議（預設 OFF）。每次死結都寫進錯誤日誌，事後才查得到
+innodb_autoinc_lock_mode  = 2                   # 預設。搭配 ROW 格式 binlog 最快
+innodb_adaptive_hash_index = ON                 # 預設。若 SHOW ENGINE INNODB STATUS 看到大量 AHI 等待再關閉
+innodb_stats_persistent   = ON                  # 預設
+innodb_temp_data_file_path = ibtmp1:12M:autoextend:max:10G  # 建議（預設不設上限）。避免失控的查詢把全域暫存表空間撐爆磁碟
+innodb_undo_log_truncate  = ON                  # 預設
+innodb_max_undo_log_size  = 1G                  # 預設
+transaction_isolation     = REPEATABLE-READ     # 預設
+
+# ==================== 慢查詢日誌 ====================
+slow_query_log            = ON                  # 建議（預設 OFF）
+slow_query_log_file       = /var/lib/mysql/slow.log
+long_query_time           = 1                   # 建議（預設 10 秒）。OLTP 可再降到 0.5
+log_slow_extra            = ON                  # 建議（預設 OFF）。多記錄 Rows_examined、Bytes_sent 等欄位
+log_queries_not_using_indexes = OFF             # 預設。開了日誌量會暴增，只在排查時暫時開
+
+# ==================== 監控 ====================
+performance_schema        = ON                  # 預設。監控、sys schema 都靠它，不要關
+```
+
+主機規格不同時，主要調整下面這幾個，其他維持上面的值即可：
+
+| 實體記憶體 | `innodb_buffer_pool_size` | `innodb_buffer_pool_instances` | `innodb_redo_log_capacity` |
+| :--- | :--- | :--- | :--- |
+| 8 GB | 5G | 4 | 1G |
+| 16 GB | 10G | 8 | 2G |
+| 32 GB | 22G | 8 | 4G |
+| 64 GB | 46G | 8 | 8G |
+| 128 GB | 96G | 16 | 16G |
+
+| 磁碟 | `innodb_io_capacity` | `innodb_io_capacity_max` |
+| :--- | :--- | :--- |
+| 傳統硬碟 | 200 | 2000 |
+| SATA SSD | 2000 | 4000 |
+| NVMe SSD | 5000~10000 | 20000 |
+
+- `innodb_buffer_pool_size` 必須是 `innodb_buffer_pool_chunk_size`（預設 128M）× `innodb_buffer_pool_instances` 的整數倍，不是的話 MySQL 會自動往上進位。上表的值都符合。
+- 主機上還跑其他服務（應用程式、監控 agent）時，buffer pool 要再扣掉它們用的記憶體。
+- `max_connections` 依應用程式實際的連線池大小設定，和主機規格無關。
+
+> `innodb_redo_log_capacity = 2G` 第一次啟動時就會在 `/var/lib/mysql/#innodb_redo/` 建出約 2 GB 的檔案（實測 `du -sh` 為 2.1G），磁碟空間要預留。
+{: .prompt-info }
+
+### 2-3. 複製設定
 
 ```ini
 # /etc/my.cnf.d/gtid.cnf
+# 複製相關設定
 [mysqld]
 server_id                = 1          # 每台不同：db1=1、db2=2
 report_host              = db1        # 每台填自己的主機名
 bind_address             = 0.0.0.0
 
-# Binlog 與 GTID
+# ---- Binlog 與 GTID ----
 log_bin                  = mysql-bin
-binlog_format            = ROW
+binlog_format            = ROW        # 預設。8.0.34 起此參數標為棄用（見下方說明）
 gtid_mode                = ON
 enforce_gtid_consistency = ON
-log_replica_updates      = ON
-binlog_expire_logs_seconds = 604800   # 保留 7 天
+log_replica_updates      = ON         # 預設。從庫也寫 binlog，切換成主庫後其他從庫才接得上
+binlog_expire_logs_seconds = 604800   # 建議（預設 30 天）。保留 7 天，至少要涵蓋兩次完整備份的間隔
+sync_binlog              = 1          # 預設。每次 commit 都把 binlog 落盤，HA 環境必須是 1
+binlog_row_image         = FULL       # 預設。MINIMAL 可縮小 binlog，但資料修復與 CDC 工具會少資訊
+binlog_cache_size        = 32K        # 預設。Binlog_cache_disk_use 持續增加時再調大
+max_binlog_size          = 1G         # 預設
+# binlog_space_limit     = 50G        # Percona 專屬（預設 0 = 不限制）：binlog 總量上限，防止塞滿磁碟
 
-# 複製安全性
+# ---- 從庫 ----
 relay_log                = relay-bin
-relay_log_recovery       = ON
-sync_binlog              = 1
-innodb_flush_log_at_trx_commit = 1
+relay_log_recovery       = ON         # 建議（預設 OFF）。從庫當機重啟後丟棄可能損毀的 relay log，從主庫重抓
+replica_parallel_workers = 4          # 預設。調整方式見「平行複製」篇
+replica_preserve_commit_order = ON    # 預設
 ```
 
 `db2` 把 `server_id` 改成 `2`、`report_host` 改成 `db2`。
@@ -206,6 +330,40 @@ chmod 600 /root/.my.cnf
                  @@log_bin: 1
            @@binlog_format: ROW
 ```
+
+確認效能設定也生效（16 GB 主機的值）：
+
+```console
+# mysql -e "SELECT @@innodb_buffer_pool_size/1024/1024/1024 AS bp_gb, @@innodb_buffer_pool_instances AS bp_inst, @@innodb_redo_log_capacity/1024/1024/1024 AS redo_gb, @@innodb_flush_method, @@innodb_io_capacity, @@innodb_io_capacity_max, @@innodb_page_cleaners, @@max_connections, @@skip_name_resolve, @@tmp_table_size/1024/1024 AS tmp_mb, @@slow_query_log, @@long_query_time, @@log_timestamps, @@innodb_temp_data_file_path, @@open_files_limit\G"
+*************************** 1. row ***************************
+                       bp_gb: 10.000000000000
+                     bp_inst: 8
+                     redo_gb: 2.000000000000
+       @@innodb_flush_method: O_DIRECT
+        @@innodb_io_capacity: 2000
+    @@innodb_io_capacity_max: 4000
+      @@innodb_page_cleaners: 4
+           @@max_connections: 500
+         @@skip_name_resolve: 1
+                      tmp_mb: 64.00000000
+            @@slow_query_log: 1
+           @@long_query_time: 1.000000
+            @@log_timestamps: SYSTEM
+@@innodb_temp_data_file_path: ibtmp1:12M:autoextend:max:10G
+          @@open_files_limit: 10000
+```
+
+慢查詢日誌也確認一下（`log_slow_extra = ON` 會多出 `Rows_examined`、`Bytes_sent`、`Created_tmp_disk_tables` 等欄位）：
+
+```console
+# mysql -e "SELECT SLEEP(1.2)" > /dev/null; tail -4 /var/lib/mysql/slow.log
+# User@Host: root[root] @ localhost []  Id:    13
+# Query_time: 1.200331  Lock_time: 0.000000 Rows_sent: 1  Rows_examined: 1 Thread_id: 13 Errno: 0 Killed: 0 Bytes_received: 24 Bytes_sent: 58 Read_first: 0 Read_last: 0 Read_key: 0 Read_next: 0 Read_prev: 0 Read_rnd: 0 Read_rnd_next: 0 Sort_merge_passes: 0 Sort_range_count: 0 Sort_rows: 0 Sort_scan_count: 0 Created_tmp_disk_tables: 0 Created_tmp_tables: 0 Start: 2026-10-24T05:20:31.216667-00:00 End: 2026-10-24T05:20:32.416998-00:00 Schema:  Rows_affected: 0
+SET timestamp=1792819231;
+SELECT SLEEP(1.2);
+```
+
+啟動時錯誤日誌另外會有兩行 Warning，都可以忽略：`Insecure configuration for --secure-log-path`（Percona 專屬參數，未設定時的提醒）與 `CA certificate ca.pem is self signed`（安裝時自動產生的自簽憑證）。
 
 ## 步驟 4：主庫建立複製帳號（db1）
 
@@ -526,6 +684,7 @@ networks:
 | :--- | :--- | :--- | :--- |
 | 1 安裝 | `rpm -qa`、`mysqld --version` | 8.0.46-37.1 | ✅ A、B |
 | 2~3 設定與啟動 | `SELECT @@server_id, @@gtid_mode ...` | 各台 `server_id` 不同、`gtid_mode=ON` | ✅ A（補 includedir 後）、B |
+| 2-2 效能設定 | 套用後啟動，查詢各參數；觸發一筆慢查詢 | 服務正常啟動、錯誤日誌無 `[ERROR]`、參數值與設定檔一致、`slow.log` 有記錄 | ✅ B（另在 Group Replication、InnoDB Cluster 三節點上套用同一份設定，叢集建立正常） |
 | 5 建從庫 | `grep GTID_PURGED full.sql`；匯入後比對 `gtid_executed` | 從庫 `gtid_executed` = 主庫 dump 時的集合 | ✅ A、B |
 | 6 建立複製 | `SHOW REPLICA STATUS\G` | IO / SQL 都 `Yes`、`Last_*_Error` 空白 | ✅ A、B |
 | 8 資料同步 | 主庫寫入後到從庫查詢、比對 `gtid_executed` | 資料與 GTID 集合一致；從庫寫入回 `ERROR 1290` | ✅ A、B |

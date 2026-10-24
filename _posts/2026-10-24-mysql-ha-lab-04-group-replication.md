@@ -65,6 +65,11 @@ dnf 安裝的 `/etc/my.cnf` 沒有 `!includedir /etc/my.cnf.d`，**先補上**�
 grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf
 ```
 
+效能與運維的基礎設定（buffer pool、redo log、I/O、連線、慢查詢日誌等）請直接沿用 [GTID 篇步驟 2-2]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 的 `/etc/my.cnf.d/00-server.cnf`，三台都放同一份。實測套用這份設定（buffer pool 10G、redo 2G）後，叢集建立與資料同步都正常。下面的 `gr.cnf` 只放本篇需要的設定。
+
+> 實驗用的 Docker 主機只有約 7.7 GB 記憶體，三台各設 10G buffer pool 仍能啟動，是因為 InnoDB 的 buffer pool 用到才配置實體記憶體：實測每台 `mysqld` 虛擬記憶體約 12.4 GB，實際佔用（RSS）只有 1.4~1.9 GB。這只代表設定會被接受、叢集功能正常；資料量一大就會 OOM。**記憶體較小的實驗機請依 GTID 篇的對照表調小 buffer pool。**
+{: .prompt-warning }
+
 先產生一個 UUID 當群組名稱，三台要一樣：
 
 ```console
@@ -135,6 +140,16 @@ db1# mysql -e "SELECT PLUGIN_NAME, PLUGIN_STATUS FROM information_schema.PLUGINS
 | group_replication | ACTIVE        |
 +-------------------+---------------+
 ```
+
+第一次啟動時錯誤日誌會有幾行 Warning，都是正常的：
+
+```console
+[Warning] [MY-013501] [Server] Ignoring --plugin-load[_add] list as the server is running with --initialize(-insecure).
+[Warning] [MY-000067] [Server] unknown variable 'loose_group_replication_group_name=8e72d555-fe66-40fb-ac72-9df87aad549b'.
+...（loose_group_replication_* 每個參數各一行，共 7 行）
+```
+
+這是 `mysqld_pre_systemd` 初始化資料目錄時不載入外掛，`loose_` 前綴讓它只發 Warning 而不是啟動失敗。正式啟動後外掛就是 `ACTIVE`，這些 Warning 不會再出現。
 
 ## 步驟 4：清掉本機的 GTID（三台都做）
 
@@ -227,7 +242,9 @@ db1# mysql -e "SELECT MEMBER_HOST, MEMBER_PORT, MEMBER_STATE, MEMBER_ROLE, MEMBE
 +-------------+-------------+--------------+-------------+----------------+
 ```
 
-三台都 `ONLINE`，群組建立完成。最後讓節點重啟後自動加回群組（三台都做）：
+三台都 `ONLINE`，群組建立完成。
+
+加入群組後，`db2`、`db3` 的錯誤日誌會多一行 `[Warning] [MY-010604] [Repl] Neither --relay-log nor --relay-log-index were used; so replication may break when this MySQL server acts as a replica and has his hostname changed!!`。原因是 `gr.cnf` 沒有指定 relay log 檔名，預設會用主機名當前綴，日後改主機名才會有影響，可以忽略。最後讓節點重啟後自動加回群組（三台都做）：
 
 ```sql
 SET PERSIST group_replication_start_on_boot = ON;
@@ -271,7 +288,12 @@ db1# mysql -e "CREATE TABLE shop.nopk (a INT, b INT); INSERT INTO shop.nopk VALU
 ERROR 3098 (HY000) at line 1: The table does not comply with the requirements by an external plugin.
 ```
 
-`CREATE TABLE` 本身會成功，錯在 `INSERT`。這個錯誤訊息很不直覺，看到時第一個就要檢查主鍵。
+`CREATE TABLE` 本身會成功，錯在 `INSERT`。這個錯誤訊息很不直覺，Primary 的錯誤日誌裡的說明比較清楚：
+
+```console
+db1# grep MY-011542 /var/log/mysqld.log
+[ERROR] [MY-011542] [Repl] Plugin group_replication reported: 'Table nopk does not have any PRIMARY KEY. This is not compatible with Group Replication.'
+```
 
 8.0 的幾個預設值也確認一下（8.4 有改，見 [HA/DR 篇的版本比較]({% post_url 2026-10-24-mysql-ops-03-ha-dr %})）：
 
@@ -403,6 +425,8 @@ MGR 本身**不提供**連線導向，主庫換了之後應用程式不會知道
 | 9 | `systemctl stop mysqld` 停掉 Primary，查成員表與錯誤日誌 | 剩下兩台自動選出新 Primary 且可寫入 | ✅ 停機 6.6 秒後 db2 成為 Primary | ✅ db2 成為 Primary |
 | 10 | `systemctl start mysqld` | 舊 Primary 以 `SECONDARY` 自動加回，資料齊全 | ✅ | ✅ |
 | 11 | `group_replication_set_as_primary()` | 指定節點成為 `PRIMARY` | ✅ | ✅ |
+
+**套用 00-server.cnf 後再驗證一次**：GTID 篇補上完整的效能設定後，在環境 A 從全新主機依本篇步驟 0~11 全部重跑。三台都套用 buffer pool 10G / 8 instances / redo 2G，`O_DIRECT`、`skip_name_resolve`、慢查詢日誌都生效，全部步驟通過。`rpl_user@'%'` 在 `skip_name_resolve = ON` 下連線正常。整段錯誤日誌的 `[ERROR]` 只有步驟 8 刻意觸發的 MY-011542，`docker events` 與 dmesg 也沒有任何 OOM 紀錄。
 
 **錯誤處理紀錄**：
 
