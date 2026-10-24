@@ -1,0 +1,9 @@
+# Rocky Linux 9 + systemd（還沒裝 Elasticsearch）：給 es1 現場照「步驟 1」安裝用
+# 注意：Docker Hub 的 rockylinux:9 停在 9.3，要用 rockylinux/rockylinux:9
+FROM rockylinux/rockylinux:9
+RUN mkdir -p /etc/sysctl.d \
+ && dnf install -y systemd procps-ng iproute hostname which less vim-minimal tzdata diffutils jq openssl python3 \
+ && dnf clean all \
+ && systemctl mask systemd-logind.service getty.target console-getty.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/usr/sbin/init"]

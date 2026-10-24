@@ -1,0 +1,34 @@
+# es1：單節點；esc1~esc3（+esc4 擴充）：三節點叢集；esu1~esu3：8.19 → 9.5 滾動升級；esd9 / esd8：預設值對照
+x-node: &node
+  image: eslab-rocky9-es9
+  pull_policy: never
+  privileged: true            # systemd 當 PID 1、sysctl、mlockall 需要
+  cgroup: host
+  ulimits: { memlock: -1, nofile: 65535 }
+  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro", "./bin:/root/bin:ro", "snap:/mnt/es-snapshots"]
+  tmpfs: ["/run", "/run/lock"]
+  extra_hosts:
+    - "es1:192.168.60.11"
+    - "esc1:192.168.60.21"
+    - "esc2:192.168.60.22"
+    - "esc3:192.168.60.23"
+    - "esc4:192.168.60.24"
+    - "esu1:192.168.60.31"
+    - "esu2:192.168.60.32"
+    - "esu3:192.168.60.33"
+services:
+  es1:  { <<: *node, image: eslab-rocky9-base, hostname: es1,  networks: { labnet: { ipv4_address: 192.168.60.11 } } }
+  esc1: { <<: *node, hostname: esc1, networks: { labnet: { ipv4_address: 192.168.60.21 } } }
+  esc2: { <<: *node, hostname: esc2, networks: { labnet: { ipv4_address: 192.168.60.22 } } }
+  esc3: { <<: *node, hostname: esc3, networks: { labnet: { ipv4_address: 192.168.60.23 } } }
+  esc4: { <<: *node, hostname: esc4, networks: { labnet: { ipv4_address: 192.168.60.24 } } }
+  esu1: { <<: *node, image: eslab-rocky9-es8, hostname: esu1, networks: { labnet: { ipv4_address: 192.168.60.31 } } }
+  esu2: { <<: *node, image: eslab-rocky9-es8, hostname: esu2, networks: { labnet: { ipv4_address: 192.168.60.32 } } }
+  esu3: { <<: *node, image: eslab-rocky9-es8, hostname: esu3, networks: { labnet: { ipv4_address: 192.168.60.33 } } }
+  esd9: { <<: *node, hostname: esd9, networks: { labnet: { ipv4_address: 192.168.60.41 } } }
+  esd8: { <<: *node, image: eslab-rocky9-es8, hostname: esd8, networks: { labnet: { ipv4_address: 192.168.60.42 } } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 192.168.60.0/24 } ] }
+volumes:
+  snap: {}
