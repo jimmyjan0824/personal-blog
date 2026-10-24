@@ -1,0 +1,22 @@
+# pg1：Standalone；pgs1~pgs3：Streaming Replication（1 主 2 從）
+x-node: &node
+  image: pglab-rocky9-pg17
+  pull_policy: never
+  privileged: true            # systemd 當 PID 1、sysctl 需要
+  cgroup: host
+  shm_size: "1gb"             # Docker 預設 /dev/shm 只有 64MB，平行查詢的 dynamic shared memory 會不夠
+  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro", "./bin:/root/bin:ro"]
+  tmpfs: ["/run", "/run/lock"]
+  extra_hosts:
+    - "pg1:192.168.59.11"
+    - "pgs1:192.168.59.21"
+    - "pgs2:192.168.59.22"
+    - "pgs3:192.168.59.23"
+services:
+  pg1:  { <<: *node, image: pglab-rocky9-base, hostname: pg1,  networks: { labnet: { ipv4_address: 192.168.59.11 } } }
+  pgs1: { <<: *node, hostname: pgs1, networks: { labnet: { ipv4_address: 192.168.59.21 } } }
+  pgs2: { <<: *node, hostname: pgs2, networks: { labnet: { ipv4_address: 192.168.59.22 } } }
+  pgs3: { <<: *node, hostname: pgs3, networks: { labnet: { ipv4_address: 192.168.59.23 } } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 192.168.59.0/24 } ] }
