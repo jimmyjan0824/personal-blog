@@ -1,0 +1,230 @@
+
+======== 啟動 18（10-standalone.sh 建好的 /var/lib/pgsql/18/data） ========  (2026-10-24 15:36:36)
+[pg1]# runuser -u postgres -- /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -l /var/lib/pgsql/18/startup.log -w start >/dev/null; runuser -u postgres -- /usr/pgsql-18/bin/psql -X -p 5433 -Atc 'SELECT version()'
+PostgreSQL 18.6 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit
+
+
+======== pg_stat_checkpointer 欄位 ========  (2026-10-24 15:36:36)
+[pg1] postgres=# SELECT string_agg(attname, ', ' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'pg_stat_checkpointer'::regclass AND attnum > 0;
+                                                                string_agg                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
+ num_timed, num_requested, restartpoints_timed, restartpoints_req, restartpoints_done, write_time, sync_time, buffers_written, stats_reset
+(1 row)
+
+
+[pg1] postgres=# SELECT string_agg(attname, ', ' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'pg_stat_checkpointer'::regclass AND attnum > 0;
+                                                                            string_agg                                                                             
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ num_timed, num_requested, num_done, restartpoints_timed, restartpoints_req, restartpoints_done, write_time, sync_time, buffers_written, slru_written, stats_reset
+(1 row)
+
+
+
+======== pg_stat_io 欄位 ========  (2026-10-24 15:36:37)
+[pg1] postgres=# SELECT string_agg(attname, ', ' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'pg_stat_io'::regclass AND attnum > 0;
+                                                                                        string_agg                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ backend_type, object, context, reads, read_time, writes, write_time, writebacks, writeback_time, extends, extend_time, op_bytes, hits, evictions, reuses, fsyncs, fsync_time, stats_reset
+(1 row)
+
+
+[pg1] postgres=# SELECT string_agg(attname, ', ' ORDER BY attnum) FROM pg_attribute WHERE attrelid = 'pg_stat_io'::regclass AND attnum > 0;
+                                                                                                       string_agg                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ backend_type, object, context, reads, read_bytes, read_time, writes, write_bytes, write_time, writebacks, writeback_time, extends, extend_bytes, extend_time, hits, evictions, reuses, fsyncs, fsync_time, stats_reset
+(1 row)
+
+
+
+======== pg_wait_events（17 新增） ========  (2026-10-24 15:36:37)
+[pg1] postgres=# SELECT type, name, description FROM pg_wait_events WHERE name IN ('SyncRep', 'WALWrite', 'DataFileRead');
+  type  |     name     |                                   description                                    
+--------+--------------+----------------------------------------------------------------------------------
+ IO     | DataFileRead | Waiting for a read from a relation data file
+ IPC    | SyncRep      | Waiting for confirmation from a remote server during synchronous replication
+ LWLock | SyncRep      | Waiting to read or update information about the state of synchronous replication
+ LWLock | WALWrite     | Waiting for WAL buffers to be written to disk
+(4 rows)
+
+
+
+======== 內建角色 ========  (2026-10-24 15:36:37)
+[pg1] postgres=# SELECT rolname FROM pg_roles WHERE rolname IN ('pg_maintain','pg_signal_autovacuum_worker','pg_use_reserved_connections','pg_checkpoint') ORDER BY 1;
+           rolname           
+-----------------------------
+ pg_checkpoint
+ pg_maintain
+ pg_use_reserved_connections
+(3 rows)
+
+
+[pg1] postgres=# SELECT rolname FROM pg_roles WHERE rolname IN ('pg_maintain','pg_signal_autovacuum_worker','pg_use_reserved_connections','pg_checkpoint') ORDER BY 1;
+           rolname           
+-----------------------------
+ pg_checkpoint
+ pg_maintain
+ pg_signal_autovacuum_worker
+ pg_use_reserved_connections
+(4 rows)
+
+
+
+======== EXPLAIN ANALYZE 預設是否帶 BUFFERS ========  (2026-10-24 15:36:37)
+[pg1] postgres=# EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) FROM pg_class;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   ->  Index Only Scan using pg_class_tblspc_relfilenode_index on pg_class (actual rows=415 loops=1)
+         Heap Fetches: 0
+(3 rows)
+
+
+[pg1] postgres=# EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT count(*) FROM pg_class;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1.00 loops=1)
+   Buffers: shared read=2
+   I/O Timings: shared read=0.014
+   ->  Index Only Scan using pg_class_tblspc_relfilenode_index on pg_class (actual rows=415.00 loops=1)
+         Heap Fetches: 0
+         Index Searches: 1
+         Buffers: shared read=2
+         I/O Timings: shared read=0.014
+ Planning:
+   Buffers: shared hit=64 read=5
+   I/O Timings: shared read=0.042
+(11 rows)
+
+
+
+======== uuidv7() ========  (2026-10-24 15:36:37)
+[pg1] postgres=# SELECT uuidv7();
+ERROR:  function uuidv7() does not exist
+LINE 1: SELECT uuidv7();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+[pg1] postgres=# SELECT uuidv7(), uuid_extract_timestamp(uuidv7());
+                uuidv7                |   uuid_extract_timestamp   
+--------------------------------------+----------------------------
+ 01a16cd7-165d-7abf-9e54-1ffaf9f0eaf1 | 2026-10-24 15:36:37.725+08
+(1 row)
+
+
+
+======== Generated column 預設 virtual / stored ========  (2026-10-24 15:36:37)
+[pg1] postgres=# CREATE TEMP TABLE g (a int, b int GENERATED ALWAYS AS (a * 2));
+ERROR:  syntax error at or near ")"
+LINE 1: ...ATE TEMP TABLE g (a int, b int GENERATED ALWAYS AS (a * 2));
+                                                                     ^
+
+[pg1] postgres=# CREATE TABLE g (a int, b int GENERATED ALWAYS AS (a * 2)); SELECT attname, attgenerated FROM pg_attribute WHERE attrelid = 'g'::regclass AND attname = 'b'; DROP TABLE g;
+CREATE TABLE
+ attname | attgenerated 
+---------+--------------
+ b       | v
+(1 row)
+
+DROP TABLE
+
+
+======== NOT NULL ... NOT VALID ========  (2026-10-24 15:36:37)
+[pg1] postgres=# CREATE TEMP TABLE n (a int); ALTER TABLE n ADD CONSTRAINT n_a_nn NOT NULL a NOT VALID;
+ERROR:  syntax error at or near "NOT"
+LINE 1: ...LE n (a int); ALTER TABLE n ADD CONSTRAINT n_a_nn NOT NULL a...
+                                                             ^
+
+[pg1] postgres=# CREATE TABLE n (a int); INSERT INTO n VALUES (NULL); ALTER TABLE n ADD CONSTRAINT n_a_nn NOT NULL a NOT VALID; DELETE FROM n; ALTER TABLE n VALIDATE CONSTRAINT n_a_nn; SELECT conname, contype, convalidated FROM pg_constraint WHERE conrelid = 'n'::regclass; DROP TABLE n;
+CREATE TABLE
+INSERT 0 1
+ALTER TABLE
+DELETE 1
+ALTER TABLE
+ conname | contype | convalidated 
+---------+---------+--------------
+ n_a_nn  | n       | t
+(1 row)
+
+DROP TABLE
+
+
+======== RETURNING OLD / NEW ========  (2026-10-24 15:36:38)
+[pg1] postgres=# CREATE TABLE r (id int, v int); INSERT INTO r VALUES (1, 10); UPDATE r SET v = 20 WHERE id = 1 RETURNING old.v AS old_v, new.v AS new_v; DROP TABLE r;
+CREATE TABLE
+INSERT 0 1
+ old_v | new_v 
+-------+-------
+    10 |    20
+(1 row)
+
+UPDATE 1
+DROP TABLE
+
+
+======== md5 密碼 ========  (2026-10-24 15:36:38)
+[pg1] postgres=# SET password_encryption = 'md5'; CREATE ROLE md5_test LOGIN PASSWORD 'x'; DROP ROLE md5_test;
+SET
+CREATE ROLE
+DROP ROLE
+
+[pg1] postgres=# SET password_encryption = 'md5'; CREATE ROLE md5_test LOGIN PASSWORD 'x'; DROP ROLE md5_test;
+WARNING:  setting an MD5-encrypted password
+DETAIL:  MD5 password support is deprecated and will be removed in a future release of PostgreSQL.
+HINT:  Refer to the PostgreSQL documentation for details about migrating to another password type.
+SET
+CREATE ROLE
+DROP ROLE
+
+
+======== MAINTAIN 權限（17） ========  (2026-10-24 15:36:38)
+[pg1] postgres=# CREATE ROLE ops_test NOLOGIN; CREATE TABLE maint_t (a int); GRANT MAINTAIN ON maint_t TO ops_test; SELECT has_table_privilege('ops_test', 'maint_t', 'MAINTAIN'); DROP TABLE maint_t; DROP ROLE ops_test;
+CREATE ROLE
+CREATE TABLE
+GRANT
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+DROP TABLE
+DROP ROLE
+
+
+======== pg_upgrade：17 沒開 checksums 的叢集升到 18 預設 initdb（checksums 開） ========  (2026-10-24 15:36:38)
+[pg1]# runuser -u postgres -- /usr/pgsql-17/bin/initdb -D /tmp/pg17nock --encoding=UTF8 --locale=C.UTF-8 >/dev/null && runuser -u postgres -- /usr/pgsql-18/bin/initdb -D /tmp/pg18ck --encoding=UTF8 --locale=C.UTF-8 >/dev/null && runuser -u postgres -- /usr/pgsql-17/bin/pg_controldata /tmp/pg17nock | grep checksum && runuser -u postgres -- /usr/pgsql-18/bin/pg_controldata /tmp/pg18ck | grep checksum
+initdb: warning: enabling "trust" authentication for local connections
+initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+initdb: warning: enabling "trust" authentication for local connections
+initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+Data page checksum version:           0
+Data page checksum version:           1
+
+[pg1]# cd /tmp && runuser -u postgres -- /usr/pgsql-18/bin/pg_upgrade -b /usr/pgsql-17/bin -B /usr/pgsql-18/bin -d /tmp/pg17nock -D /tmp/pg18ck -p 50432 -P 50433 --check 2>&1 | tail -6
+Performing Consistency Checks
+-----------------------------
+Checking cluster versions                                     ok
+
+old cluster does not use data checksums but the new one does
+Failure, exiting
+
+[pg1]# rm -rf /tmp/pg18ck && runuser -u postgres -- /usr/pgsql-18/bin/initdb -D /tmp/pg18ck --no-data-checksums --encoding=UTF8 --locale=C.UTF-8 >/dev/null && cd /tmp && runuser -u postgres -- /usr/pgsql-18/bin/pg_upgrade -b /usr/pgsql-17/bin -B /usr/pgsql-18/bin -d /tmp/pg17nock -D /tmp/pg18ck -p 50432 -P 50433 --check 2>&1 | tail -4
+initdb: warning: enabling "trust" authentication for local connections
+initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+Checking for prepared transactions                            ok
+Checking for new cluster tablespace directories               ok
+
+*Clusters are compatible*
+
+[pg1]# rm -rf /tmp/pg17nock /tmp/pg18ck /tmp/pg_upgrade_output.d
+
+
+======== 18 的 io_method / io_workers 實際行程 ========  (2026-10-24 15:36:40)
+[pg1]# ps -o pid,cmd -u postgres | grep -E 'io worker' | grep -v grep
+   1637 postgres: io worker 0
+   1638 postgres: io worker 1
+   1639 postgres: io worker 2
+
+[pg1]# runuser -u postgres -- /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -m fast stop
+waiting for server to shut down.... done
+server stopped
+
