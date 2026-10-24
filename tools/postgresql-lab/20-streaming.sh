@@ -22,11 +22,11 @@ x pgs1 'PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-
 x pgs1 "install -o postgres -g postgres -m 600 /root/conf/postgresql-streaming.conf $D/postgresql.conf && install -o postgres -g postgres -m 600 /root/conf/pg_hba-streaming.conf $D/pg_hba.conf && systemctl enable --now postgresql-17 && systemctl is-active postgresql-17"
 x pgs1 '/root/bin/checkconf.sh /var/lib/pgsql/17/data/postgresql.conf'
 
-note "步驟 2：複製帳號與 pg_rewind 帳號"
-p pgs1 "CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'ChangeMe_Repl_2026';"
-p pgs1 "CREATE ROLE rewind_user LOGIN PASSWORD 'ChangeMe_Rewind_2026';"
-p pgs1 "GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO rewind_user;"
-p pgs1 "CREATE TABLE t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now()); INSERT INTO t_repl(note) VALUES ('before-standby');"
+note "步驟 2：複製帳號與 pg_rewind 帳號（還沒有從庫，synchronous_standby_names 已設定，先用 synchronous_commit = local 避免 COMMIT 卡住）"
+p pgs1 "SET synchronous_commit = local; CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'ChangeMe_Repl_2026';"
+p pgs1 "SET synchronous_commit = local; CREATE ROLE rewind_user LOGIN PASSWORD 'ChangeMe_Rewind_2026';"
+p pgs1 "SET synchronous_commit = local; GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO rewind_user;"
+p pgs1 "SET synchronous_commit = local; CREATE TABLE t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now()); INSERT INTO t_repl(note) VALUES ('before-standby');"
 
 note "步驟 3：從庫 pg_basebackup（-R 寫入 primary_conninfo，-C -S 建立 replication slot）"
 for n in pgs2 pgs3; do
@@ -86,7 +86,8 @@ p pgs2 "SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS wal
 x pgs2 'grep -hE "promote|selected new timeline|archive recovery complete|ready to accept" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4; ls /var/lib/pgsql/17/data/pg_wal/*.history'
 note "新主庫 pgs2：先替 pgs3、pgs1 建 slot，再把 pgs3 改接 pgs2"
 p pgs2 "SELECT pg_create_physical_replication_slot('pgs3'); SELECT pg_create_physical_replication_slot('pgs1');"
-p pgs3 "ALTER SYSTEM SET primary_conninfo = 'host=pgs2 user=replicator application_name=pgs3'; SELECT pg_reload_conf();"
+p pgs3 "ALTER SYSTEM SET primary_conninfo = 'host=pgs2 user=replicator application_name=pgs3';"
+p pgs3 "SELECT pg_reload_conf();"
 x pgs3 'sleep 4; grep -hE "timeline|streaming|primary_conninfo" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4'
 p pgs3 "SELECT status, sender_host, received_tli, flushed_lsn FROM pg_stat_wal_receiver;"
 p pgs2 "INSERT INTO t_repl(note) VALUES ('after-failover'); SELECT application_name, state, sync_state FROM pg_stat_replication;"

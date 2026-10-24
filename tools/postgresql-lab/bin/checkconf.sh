@@ -22,12 +22,12 @@ SELECT v.line, v.tag, v.name, s.setting, s.boot_val, s.unit, s.source,
             WHEN v.tag = '預設' AND s.setting IS DISTINCT FROM s.boot_val THEN 'CHECK'
             WHEN v.tag = '建議' AND s.setting = s.boot_val THEN 'CHECK'
             ELSE 'ok' END AS result
-FROM v LEFT JOIN pg_settings s ON s.name = v.name
+FROM v LEFT JOIN pg_settings s ON lower(s.name) = v.name
 WHERE s.name IS NULL OR s.source <> 'configuration file'
    OR (v.tag = '預設' AND s.setting IS DISTINCT FROM s.boot_val)
    OR (v.tag = '建議' AND s.setting = s.boot_val)
 ORDER BY v.line;
 \echo '--- 標「建議」的參數：實際值與預設值（boot_val，單位見 unit）'
 WITH v(tag, name, line) AS (VALUES $vals)
-SELECT v.name, s.setting, s.boot_val, s.unit FROM v JOIN pg_settings s ON s.name = v.name WHERE v.tag = '建議' ORDER BY v.line;
+SELECT v.name, s.setting, s.boot_val, s.unit FROM v JOIN pg_settings s ON lower(s.name) = v.name WHERE v.tag = '建議' ORDER BY v.line;
 SQL

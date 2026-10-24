@@ -1,0 +1,33 @@
+
+======== docker build pglab-rocky9-base ========  (2026-10-24 15:16:51)
+docker.io/rockylinux/rockylinux:9
+#6 exporting manifest list sha256:4d1d26d7d9d9246ee28cd5482653cdc03b90025f595ce24f5db01b9853f05815 done
+#6 naming to docker.io/library/pglab-rocky9-base:latest done
+#6 unpacking to docker.io/library/pglab-rocky9-base:latest
+#6 unpacking to docker.io/library/pglab-rocky9-base:latest 0.2s done
+#6 DONE 0.7s
+Rocky Linux release 9.8 (Blue Onyx)
+
+======== docker build pglab-rocky9-pg17 ========  (2026-10-24 15:17:15)
+#5 33.05 Complete!
+#5 33.14 66 files removed
+#5 DONE 33.2s
+
+#6 exporting to image
+#6 exporting layers
+#6 exporting layers 1.8s done
+#6 exporting manifest sha256:42d3347fabd38b4adc889b045f88f2a25ab9064a56ddf3c4e27f41d0a9cd7515 done
+#6 exporting config sha256:5a775df8eb501cc8a767fcbfcb8f4aac106450ba9f82d1eb27cd3d805e8abb32 done
+#6 exporting attestation manifest sha256:4023e2fb07dc8e080cc6aed205c3bcc56e206abc4b8a3bd6597c2359fede5919 done
+#6 exporting manifest list sha256:bf0a4c9c7f21e82f7c0332cf1ff80b4f0f9231c4cbc972f26a3dbf6d9cd98c12 done
+#6 naming to docker.io/library/pglab-rocky9-pg17:latest done
+#6 unpacking to docker.io/library/pglab-rocky9-pg17:latest
+#6 unpacking to docker.io/library/pglab-rocky9-pg17:latest 0.4s done
+#6 DONE 2.2s
+
+real	0m35.567s
+user	0m0.130s
+sys	0m0.108s
+postgresql17-server-17.11-1PGDG.rhel9.8.aarch64
+postgresql17-contrib-17.11-1PGDG.rhel9.8.aarch64
+postgres (PostgreSQL) 17.11
