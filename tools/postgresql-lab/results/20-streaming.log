@@ -1,0 +1,643 @@
+
+======== 環境 ========  (2026-10-24 15:33:37)
+[pgs1]# cat /etc/rocky-release; rpm -q postgresql17-server; ls -la /var/lib/pgsql/17/
+Rocky Linux release 9.8 (Blue Onyx)
+postgresql17-server-17.11-1PGDG.rhel9.8.aarch64
+total 16
+drwx------ 4 postgres postgres 4096 Oct 24 07:17 .
+drwx------ 3 postgres postgres 4096 Oct 24 07:17 ..
+drwx------ 2 postgres postgres 4096 Aug 11 19:50 backups
+drwx------ 2 postgres postgres 4096 Aug 11 19:50 data
+
+
+======== 步驟 0：三台都做 OS 參數與 .pgpass ========  (2026-10-24 15:33:37)
+[pgs1]# cp /root/conf/99-postgresql.conf /etc/sysctl.d/ && sysctl -q -p /etc/sysctl.d/99-postgresql.conf && install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
+
+[pgs1]# printf "%s\n" "*:5432:replication:replicator:ChangeMe_Repl_2026" "*:5432:postgres:rewind_user:ChangeMe_Rewind_2026" > /var/lib/pgsql/.pgpass && chown postgres: /var/lib/pgsql/.pgpass && chmod 600 /var/lib/pgsql/.pgpass && ls -l /var/lib/pgsql/.pgpass
+-rw------- 1 postgres postgres 98 Oct 24 07:33 /var/lib/pgsql/.pgpass
+
+[pgs2]# cp /root/conf/99-postgresql.conf /etc/sysctl.d/ && sysctl -q -p /etc/sysctl.d/99-postgresql.conf && install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
+
+[pgs2]# printf "%s\n" "*:5432:replication:replicator:ChangeMe_Repl_2026" "*:5432:postgres:rewind_user:ChangeMe_Rewind_2026" > /var/lib/pgsql/.pgpass && chown postgres: /var/lib/pgsql/.pgpass && chmod 600 /var/lib/pgsql/.pgpass && ls -l /var/lib/pgsql/.pgpass
+-rw------- 1 postgres postgres 98 Oct 24 07:33 /var/lib/pgsql/.pgpass
+
+[pgs3]# cp /root/conf/99-postgresql.conf /etc/sysctl.d/ && sysctl -q -p /etc/sysctl.d/99-postgresql.conf && install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
+
+[pgs3]# printf "%s\n" "*:5432:replication:replicator:ChangeMe_Repl_2026" "*:5432:postgres:rewind_user:ChangeMe_Rewind_2026" > /var/lib/pgsql/.pgpass && chown postgres: /var/lib/pgsql/.pgpass && chmod 600 /var/lib/pgsql/.pgpass && ls -l /var/lib/pgsql/.pgpass
+-rw------- 1 postgres postgres 98 Oct 24 07:33 /var/lib/pgsql/.pgpass
+
+
+======== 步驟 1：主庫 pgs1 initdb、設定檔、啟動 ========  (2026-10-24 15:33:37)
+[pgs1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb
+Initializing database ... OK
+
+
+[pgs1]# install -o postgres -g postgres -m 600 /root/conf/postgresql-streaming.conf /var/lib/pgsql/17/data/postgresql.conf && install -o postgres -g postgres -m 600 /root/conf/pg_hba-streaming.conf /var/lib/pgsql/17/data/pg_hba.conf && systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
+active
+
+[pgs1]# /root/bin/checkconf.sh /var/lib/pgsql/17/data/postgresql.conf
+--- pg_file_settings：沒有套用或有錯誤的設定（空的代表全部套用）
+ sourceline | name | setting | applied | error 
+------------+------+---------+---------+-------
+(0 rows)
+
+--- 設定檔參數數量與標記
+  tag   | count 
+--------+-------
+ initdb |     6
+ 建議   |    48
+ 預設   |   101
+(3 rows)
+
+--- 需要確認的項目（CHECK）；UNKNOWN 代表這個版本沒有這個參數
+ line | tag  |          name           | setting | boot_val | unit |       source       |    result     
+------+------+-------------------------+---------+----------+------+--------------------+---------------
+   26 | 建議 | tcp_keepalives_idle     | 0       | 0        | s    | configuration file | CHECK
+   28 | 建議 | tcp_keepalives_interval | 0       | 0        | s    | configuration file | CHECK
+   30 | 建議 | tcp_keepalives_count    | 0       | 0        |      | configuration file | CHECK
+  155 | 預設 | wal_buffers             | 2048    | -1       | 8kB  | override           | CHECK(source)
+(4 rows)
+
+--- 標「建議」的參數：實際值與預設值（boot_val，單位見 unit）
+                name                 |                                   setting                                    |            boot_val            | unit 
+-------------------------------------+------------------------------------------------------------------------------+--------------------------------+------
+ listen_addresses                    | *                                                                            | localhost                      | 
+ max_connections                     | 200                                                                          | 100                            | 
+ tcp_keepalives_idle                 | 0                                                                            | 0                              | s
+ tcp_keepalives_interval             | 0                                                                            | 0                              | s
+ tcp_keepalives_count                | 0                                                                            | 0                              | 
+ shared_buffers                      | 524288                                                                       | 16384                          | 8kB
+ work_mem                            | 16384                                                                        | 4096                           | kB
+ maintenance_work_mem                | 1048576                                                                      | 65536                          | kB
+ temp_file_limit                     | 20971520                                                                     | -1                             | kB
+ effective_io_concurrency            | 200                                                                          | 1                              | 
+ maintenance_io_concurrency          | 200                                                                          | 10                             | 
+ max_worker_processes                | 16                                                                           | 8                              | 
+ max_parallel_workers_per_gather     | 4                                                                            | 2                              | 
+ max_parallel_maintenance_workers    | 4                                                                            | 2                              | 
+ wal_compression                     | lz4                                                                          | off                            | 
+ checkpoint_timeout                  | 900                                                                          | 300                            | s
+ max_wal_size                        | 8192                                                                         | 1024                           | MB
+ min_wal_size                        | 2048                                                                         | 80                             | MB
+ archive_mode                        | on                                                                           | off                            | 
+ archive_command                     | test ! -f /var/lib/pgsql/17/archive/%f && cp %p /var/lib/pgsql/17/archive/%f |                                | 
+ max_slot_wal_keep_size              | 51200                                                                        | -1                             | MB
+ synchronous_standby_names           | ANY 1 (pgs1, pgs2, pgs3)                                                     |                                | 
+ hot_standby_feedback                | on                                                                           | off                            | 
+ random_page_cost                    | 1.1                                                                          | 4                              | 
+ effective_cache_size                | 1572864                                                                      | 524288                         | 8kB
+ jit                                 | off                                                                          | on                             | 
+ logging_collector                   | on                                                                           | off                            | 
+ log_filename                        | postgresql-%Y-%m-%d.log                                                      | postgresql-%Y-%m-%d_%H%M%S.log | 
+ log_rotation_size                   | 0                                                                            | 10240                          | kB
+ log_truncate_on_rotation            | on                                                                           | off                            | 
+ log_min_duration_statement          | 1000                                                                         | -1                             | ms
+ log_lock_waits                      | on                                                                           | off                            | 
+ log_temp_files                      | 0                                                                            | -1                             | kB
+ log_autovacuum_min_duration         | 1000                                                                         | 600000                         | ms
+ log_line_prefix                     | %m [%p] %q%u@%d/%a %h                                                        | %m [%p]                        | 
+ log_timezone                        | Asia/Taipei                                                                  | GMT                            | 
+ track_io_timing                     | on                                                                           | off                            | 
+ track_wal_io_timing                 | on                                                                           | off                            | 
+ track_functions                     | pl                                                                           | none                           | 
+ track_activity_query_size           | 4096                                                                         | 1024                           | B
+ shared_preload_libraries            | pg_stat_statements                                                           |                                | 
+ autovacuum_max_workers              | 4                                                                            | 3                              | 
+ autovacuum_vacuum_scale_factor      | 0.05                                                                         | 0.2                            | 
+ autovacuum_analyze_scale_factor     | 0.05                                                                         | 0.1                            | 
+ autovacuum_vacuum_cost_limit        | 2000                                                                         | -1                             | 
+ idle_in_transaction_session_timeout | 600000                                                                       | 0                              | ms
+ default_toast_compression           | lz4                                                                          | pglz                           | 
+ timezone                            | Asia/Taipei                                                                  | GMT                            | 
+(48 rows)
+
+
+
+======== 步驟 2：複製帳號與 pg_rewind 帳號（還沒有從庫，synchronous_standby_names 已設定，先用 synchronous_commit = local 避免 COMMIT 卡住） ========  (2026-10-24 15:33:38)
+[pgs1] postgres=# SET synchronous_commit = local; CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'ChangeMe_Repl_2026';
+SET
+CREATE ROLE
+
+[pgs1] postgres=# SET synchronous_commit = local; CREATE ROLE rewind_user LOGIN PASSWORD 'ChangeMe_Rewind_2026';
+SET
+CREATE ROLE
+
+[pgs1] postgres=# SET synchronous_commit = local; GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO rewind_user;
+SET
+GRANT
+GRANT
+GRANT
+GRANT
+
+[pgs1] postgres=# SET synchronous_commit = local; CREATE TABLE t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now()); INSERT INTO t_repl(note) VALUES ('before-standby');
+SET
+CREATE TABLE
+INSERT 0 1
+
+
+======== 步驟 3：從庫 pg_basebackup（-R 寫入 primary_conninfo，-C -S 建立 replication slot） ========  (2026-10-24 15:33:39)
+[pgs2]# ls -A /var/lib/pgsql/17/data | wc -l
+0
+
+[pgs2]$ time pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs2' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs2 -P 2>&1 | tail -2
+23165/23165 kB (100%), 0/1 tablespace
+23165/23165 kB (100%), 1/1 tablespace
+
+real	0m0.146s
+user	0m0.008s
+sys	0m0.042s
+
+[pgs2]# cat /var/lib/pgsql/17/data/postgresql.auto.conf; ls /var/lib/pgsql/17/data/standby.signal
+# Do not edit this file manually!
+# It will be overwritten by the ALTER SYSTEM command.
+primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=pgs1 port=5432 application_name=pgs2 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+primary_slot_name = 'pgs2'
+/var/lib/pgsql/17/data/standby.signal
+
+[pgs2]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
+active
+
+[pgs3]# ls -A /var/lib/pgsql/17/data | wc -l
+0
+
+[pgs3]$ time pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs3' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs3 -P 2>&1 | tail -2
+23167/23167 kB (100%), 0/1 tablespace
+23167/23167 kB (100%), 1/1 tablespace
+
+real	0m0.392s
+user	0m0.014s
+sys	0m0.049s
+
+[pgs3]# cat /var/lib/pgsql/17/data/postgresql.auto.conf; ls /var/lib/pgsql/17/data/standby.signal
+# Do not edit this file manually!
+# It will be overwritten by the ALTER SYSTEM command.
+primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=pgs1 port=5432 application_name=pgs3 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+primary_slot_name = 'pgs3'
+/var/lib/pgsql/17/data/standby.signal
+
+[pgs3]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
+active
+
+[pgs2]# sleep 2; grep -hE "standby|streaming|consistent|redo" /var/lib/pgsql/17/data/log/postgresql-*.log
+2026-10-24 15:33:39.185 CST [158] LOG:  checkpoint complete: wrote 71 buffers (0.0%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.004 s, sync=0.010 s, total=0.025 s; sync files=54, longest=0.001 s, average=0.001 s; distance=9042 kB, estimate=9042 kB; lsn=0/2000080, redo lsn=0/2000028
+2026-10-24 15:33:39.195 CST [206] replicator@[unknown]/pgs2 192.168.59.22 LOG:  standby "pgs2" is now a candidate for quorum synchronous standby
+2026-10-24 15:33:39.528 CST [101] LOG:  starting backup recovery with redo LSN 0/2000028, checkpoint LSN 0/2000080, on timeline ID 1
+2026-10-24 15:33:39.528 CST [101] LOG:  entering standby mode
+2026-10-24 15:33:39.529 CST [101] LOG:  redo starts at 0/2000028
+2026-10-24 15:33:39.530 CST [101] LOG:  completed backup recovery with redo LSN 0/2000028 and end LSN 0/2000120
+2026-10-24 15:33:39.530 CST [101] LOG:  consistent recovery state reached at 0/2000120
+2026-10-24 15:33:39.535 CST [102] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
+
+
+======== 步驟 4：驗證複製狀態 ========  (2026-10-24 15:33:42)
+[pgs1] postgres=# SELECT application_name, client_addr, state, sync_state, sync_priority, sent_lsn, replay_lsn, write_lag, flush_lag, replay_lag FROM pg_stat_replication ORDER BY application_name;
+ application_name |  client_addr  |   state   | sync_state | sync_priority | sent_lsn  | replay_lsn |    write_lag    |    flush_lag    |   replay_lag    
+------------------+---------------+-----------+------------+---------------+-----------+------------+-----------------+-----------------+-----------------
+ pgs2             | 192.168.59.22 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.007641 | 00:00:00.007641 | 00:00:00.000833
+ pgs3             | 192.168.59.23 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.000123 | 00:00:00.000123 | 00:00:00.000123
+(2 rows)
+
+
+[pgs1] postgres=# SELECT slot_name, slot_type, active, restart_lsn, wal_status, safe_wal_size FROM pg_replication_slots ORDER BY slot_name;
+ slot_name | slot_type | active | restart_lsn | wal_status | safe_wal_size 
+-----------+-----------+--------+-------------+------------+---------------
+ pgs2      | physical  | t      | 0/4000000   | reserved   |   53703868416
+ pgs3      | physical  | t      | 0/4000000   | reserved   |   53703868416
+(2 rows)
+
+
+[pgs2] postgres=# SELECT pg_is_in_recovery(), status, sender_host, slot_name, received_tli, flushed_lsn FROM pg_stat_wal_receiver;
+ pg_is_in_recovery |  status   | sender_host | slot_name | received_tli | flushed_lsn 
+-------------------+-----------+-------------+-----------+--------------+-------------
+ t                 | streaming | pgs1        | pgs2      |            1 | 0/4000000
+(1 row)
+
+
+[pgs2] postgres=# SHOW synchronous_standby_names;
+ synchronous_standby_names 
+---------------------------
+ ANY 1 (pgs1, pgs2, pgs3)
+(1 row)
+
+
+
+======== 測試 1：主庫寫入，從庫讀得到 ========  (2026-10-24 15:33:42)
+[pgs1] postgres=# INSERT INTO t_repl(note) SELECT 'row-' || g FROM generate_series(1, 1000) g; SELECT count(*) FROM t_repl;
+INSERT 0 1000
+ count 
+-------
+  1001
+(1 row)
+
+
+[pgs2] postgres=# SELECT count(*) FROM t_repl;
+ count 
+-------
+  1001
+(1 row)
+
+
+[pgs3] postgres=# SELECT count(*) FROM t_repl;
+ count 
+-------
+  1001
+(1 row)
+
+
+
+======== 測試 2：從庫是唯讀 ========  (2026-10-24 15:33:43)
+[pgs2] postgres=# INSERT INTO t_repl(note) VALUES ('write-on-standby');
+ERROR:  cannot execute INSERT in a read-only transaction
+
+
+======== 測試 3：quorum 同步提交（ANY 1） ========  (2026-10-24 15:33:43)
+[pgs2]# systemctl stop postgresql-17
+
+[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('pgs2-down');
+INSERT 0 1
+
+[pgs1] postgres=# SELECT application_name, state, sync_state FROM pg_stat_replication;
+ application_name |   state   | sync_state 
+------------------+-----------+------------
+ pgs3             | streaming | quorum
+(1 row)
+
+
+[pgs3]# systemctl stop postgresql-17
+
+[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('both-down')    （背景執行）
+
+[pgs1]# sleep 3; cat /tmp/bg.out; echo "(還沒有輸出 = COMMIT 卡住)"
+(還沒有輸出 = COMMIT 卡住)
+
+[pgs1] postgres=# SELECT pid, state, wait_event_type, wait_event, now() - query_start AS waiting, left(query, 50) AS query FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+ pid | state  | wait_event_type | wait_event |     waiting     |                     query                     
+-----+--------+-----------------+------------+-----------------+-----------------------------------------------
+ 257 | active | IPC             | SyncRep    | 00:00:03.209372 | INSERT INTO t_repl(note) VALUES ('both-down')
+(1 row)
+
+
+[pgs3]# systemctl start postgresql-17; sleep 2
+
+[pgs1]# sleep 1; cat /tmp/bg.out
+INSERT 0 1
+
+
+======== 測試 3b：同步等待被取消時，交易其實已經在主庫提交 ========  (2026-10-24 15:33:49)
+[pgs3]# systemctl stop postgresql-17
+
+[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('cancelled-wait')    （背景執行）
+
+[pgs1]# sleep 2
+
+[pgs1] postgres=# SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+ pg_cancel_backend 
+-------------------
+ t
+(1 row)
+
+
+[pgs1]# sleep 1; cat /tmp/bg.out
+WARNING:  canceling wait for synchronous replication due to user request
+DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
+INSERT 0 1
+
+[pgs1] postgres=# SELECT id, note FROM t_repl WHERE note IN ('both-down', 'cancelled-wait');
+  id  |      note      
+------+----------------
+ 1003 | both-down
+ 1004 | cancelled-wait
+(2 rows)
+
+
+[pgs2]# systemctl start postgresql-17
+
+[pgs3]# systemctl start postgresql-17; sleep 3
+
+[pgs1] postgres=# SELECT application_name, state, sync_state FROM pg_stat_replication ORDER BY 1;
+ application_name |   state   | sync_state 
+------------------+-----------+------------
+ pgs2             | streaming | quorum
+ pgs3             | streaming | quorum
+(2 rows)
+
+
+
+======== 測試 4：pgbench 寫入壓力下的複製延遲 ========  (2026-10-24 15:33:57)
+[pgs1]$ pgbench -i -s 10 -q postgres 2>&1 | tail -1
+done in 0.86 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 0.65 s, vacuum 0.04 s, primary keys 0.16 s).
+
+[pgs1]$ (pgbench -c 8 -j 4 -T 20 postgres > /tmp/pgbench.out 2>&1 &); for i in 1 2 3 4; do sleep 4; psql -X -Atc "SELECT now()::time(0), application_name, sync_state, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_bytes, replay_lag FROM pg_stat_replication ORDER BY 2"; done; sleep 6; grep -E "^(tps|latency average|number of transactions actually)" /tmp/pgbench.out
+15:34:02|pgs2|quorum|3752|00:00:00.00054
+15:34:02|pgs3|quorum|6024|00:00:00.000797
+15:34:06|pgs2|quorum|1608|00:00:00.000811
+15:34:06|pgs3|quorum|1264|00:00:00.000517
+15:34:10|pgs2|quorum|1704|00:00:00.000345
+15:34:10|pgs3|quorum|1704|00:00:00.000457
+15:34:14|pgs2|quorum|1176|00:00:00.000691
+15:34:14|pgs3|quorum|1000|00:00:00.000879
+number of transactions actually processed: 107745
+latency average = 1.485 ms
+tps = 5387.207172 (without initial connection time)
+
+[pgs1] postgres=# SELECT 'pgs1' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
+ node | sum_abalance | history 
+------+--------------+---------
+ pgs1 |        85837 |  107745
+(1 row)
+
+
+[pgs2] postgres=# SELECT 'pgs2' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
+ node | sum_abalance | history 
+------+--------------+---------
+ pgs2 |        85837 |  107745
+(1 row)
+
+
+[pgs3] postgres=# SELECT 'pgs3' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
+ node | sum_abalance | history 
+------+--------------+---------
+ pgs3 |        85837 |  107745
+(1 row)
+
+
+
+======== 測試 5：故障切換（主庫 pgs1 當機，提升 pgs2） ========  (2026-10-24 15:34:20)
+[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('last-before-crash'); SELECT count(*), pg_current_wal_lsn() FROM t_repl;
+INSERT 0 1
+ count | pg_current_wal_lsn 
+-------+--------------------
+  1005 | 0/E9A6000
+(1 row)
+
+
+# 主機端：date '+%F %T'; docker compose kill pgs1
+2026-10-24 15:34:20
+ Container postgresql-lab-pgs1-1 Killing 
+ Container postgresql-lab-pgs1-1 Killed 
+
+[pgs2]# sleep 3; grep -hE "terminat|could not|FATAL" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -3
+		This probably means the server terminated abnormally
+2026-10-24 15:34:20.583 CST [173] FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+		This probably means the server terminated abnormally
+
+
+======== 提升前：比較兩台從庫收到的 WAL 位置，挑最新的那台提升 ========  (2026-10-24 15:34:23)
+[pgs2] postgres=# SELECT 'pgs2' AS node, pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), pg_last_xact_replay_timestamp();
+ node | pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_last_xact_replay_timestamp 
+------+-------------------------+------------------------+-------------------------------
+ pgs2 | 0/E9A63D8               | 0/E9A63D8              | 2026-10-24 15:34:20.508913+08
+(1 row)
+
+
+[pgs3] postgres=# SELECT 'pgs3' AS node, pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), pg_last_xact_replay_timestamp();
+ node | pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_last_xact_replay_timestamp 
+------+-------------------------+------------------------+-------------------------------
+ pgs3 | 0/E9A63D8               | 0/E9A63D8              | 2026-10-24 15:34:20.508913+08
+(1 row)
+
+
+# 主機端：date '+%F %T.%N' | cut -c1-23
+2026-10-24 15:34:24.010
+
+[pgs2] postgres=# SELECT pg_promote(wait => true, wait_seconds => 60);
+ pg_promote 
+------------
+ t
+(1 row)
+
+
+# 主機端：date '+%F %T.%N' | cut -c1-23
+2026-10-24 15:34:24.189
+
+[pgs2] postgres=# SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS walfile, count(*) FROM t_repl;
+ pg_is_in_recovery |         walfile          | count 
+-------------------+--------------------------+-------
+ f                 | 00000002000000000000000E |  1005
+(1 row)
+
+
+[pgs2]# grep -hE "promote|selected new timeline|archive recovery complete|ready to accept" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4; ls /var/lib/pgsql/17/data/pg_wal/*.history
+2026-10-24 15:34:24.074 CST [161] LOG:  received promote request
+2026-10-24 15:34:24.077 CST [161] LOG:  selected new timeline ID: 2
+2026-10-24 15:34:24.092 CST [161] LOG:  archive recovery complete
+2026-10-24 15:34:24.099 CST [157] LOG:  database system is ready to accept connections
+/var/lib/pgsql/17/data/pg_wal/00000002.history
+
+
+======== 新主庫 pgs2：先替 pgs3、pgs1 建 slot，再把 pgs3 改接 pgs2 ========  (2026-10-24 15:34:24)
+[pgs2] postgres=# SELECT pg_create_physical_replication_slot('pgs3'); SELECT pg_create_physical_replication_slot('pgs1');
+ pg_create_physical_replication_slot 
+-------------------------------------
+ (pgs3,)
+(1 row)
+
+ pg_create_physical_replication_slot 
+-------------------------------------
+ (pgs1,)
+(1 row)
+
+
+[pgs3] postgres=# ALTER SYSTEM SET primary_conninfo = 'host=pgs2 user=replicator application_name=pgs3';
+ALTER SYSTEM
+
+[pgs3] postgres=# SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+
+[pgs3]# sleep 4; grep -hE "timeline|streaming|primary_conninfo" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4
+2026-10-24 15:34:24.565 CST [190] LOG:  started streaming WAL from primary at 0/E000000 on timeline 1
+2026-10-24 15:34:24.568 CST [190] DETAIL:  End of WAL reached on timeline 1 at 0/E9A63D8.
+2026-10-24 15:34:24.568 CST [156] LOG:  new target timeline is 2
+2026-10-24 15:34:24.568 CST [190] LOG:  restarted WAL streaming at 0/E000000 on timeline 2
+
+[pgs3] postgres=# SELECT status, sender_host, received_tli, flushed_lsn FROM pg_stat_wal_receiver;
+  status   | sender_host | received_tli | flushed_lsn 
+-----------+-------------+--------------+-------------
+ streaming | pgs2        |            2 | 0/E9A70B8
+(1 row)
+
+
+[pgs2] postgres=# INSERT INTO t_repl(note) VALUES ('after-failover'); SELECT application_name, state, sync_state FROM pg_stat_replication;
+INSERT 0 1
+ application_name |   state   | sync_state 
+------------------+-----------+------------
+ pgs3             | streaming | quorum
+(1 row)
+
+
+[pgs3] postgres=# SELECT count(*), max(note) FILTER (WHERE id = (SELECT max(id) FROM t_repl)) AS last_note FROM t_repl;
+ count |   last_note    
+-------+----------------
+  1006 | after-failover
+(1 row)
+
+
+
+======== 測試 6：舊主庫 pgs1 回來了（systemd 會自動啟動成主庫 = 腦裂風險） ========  (2026-10-24 15:34:28)
+# 主機端：docker compose start pgs1
+ Container postgresql-lab-pgs1-1 Starting 
+ Container postgresql-lab-pgs1-1 Started 
+
+[pgs1]# sleep 5; systemctl is-active postgresql-17
+active
+
+[pgs1] postgres=# SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS walfile;
+ pg_is_in_recovery |         walfile          
+-------------------+--------------------------
+ f                 | 00000001000000000000000E
+(1 row)
+
+
+[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('split-brain')    （背景執行）
+
+[pgs1]# sleep 2
+
+[pgs1] postgres=# SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+ pg_cancel_backend 
+-------------------
+ t
+(1 row)
+
+
+[pgs1]# sleep 1; cat /tmp/bg.out
+WARNING:  canceling wait for synchronous replication due to user request
+DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
+INSERT 0 1
+
+[pgs1] postgres=# SELECT id, note FROM t_repl ORDER BY id DESC LIMIT 2;
+  id  |       note        
+------+-------------------
+ 1025 | split-brain
+ 1005 | last-before-crash
+(2 rows)
+
+
+
+======== 直接把 pgs1 當從庫啟動會失敗（timeline 已分岔） ========  (2026-10-24 15:34:37)
+[pgs1]# systemctl stop postgresql-17 && runuser -u postgres -- touch /var/lib/pgsql/17/data/standby.signal && printf "%s\n" "primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'" "primary_slot_name = 'pgs1'" >> /var/lib/pgsql/17/data/postgresql.auto.conf && cat /var/lib/pgsql/17/data/postgresql.auto.conf && systemctl start postgresql-17; sleep 5; systemctl is-active postgresql-17
+# Do not edit this file manually!
+# It will be overwritten by the ALTER SYSTEM command.
+primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'
+primary_slot_name = 'pgs1'
+active
+
+[pgs1]# grep -hE "FATAL|forked|not a child|timeline" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4
+2026-10-24 15:34:37.953 CST [114] LOG:  new timeline 2 forked off current database system timeline 1 before current recovery point 0/F0000A0
+2026-10-24 15:34:42.964 CST [118] FATAL:  could not start WAL streaming: ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+	DETAIL:  This server's history forked from timeline 1 at 0/E9A63D8.
+2026-10-24 15:34:42.964 CST [114] LOG:  new timeline 2 forked off current database system timeline 1 before current recovery point 0/F0000A0
+
+
+======== pg_rewind（-n 先試跑），再接回 pgs2 ========  (2026-10-24 15:34:43)
+[pgs1]# systemctl stop postgresql-17; systemctl is-active postgresql-17
+inactive
+
+[pgs1]$ pg_controldata /var/lib/pgsql/17/data | grep -E 'cluster state|TimeLineID'
+Database cluster state:               shut down in recovery
+Latest checkpoint's TimeLineID:       1
+Latest checkpoint's PrevTimeLineID:   1
+
+[pgs1]$ pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P 2>&1 | tail -6
+pg_rewind: need to copy 383 MB (total source directory size is 402 MB)
+     0/392784 kB (0%) copied
+392784/392784 kB (100%) copied
+pg_rewind: creating backup label and updating control file
+pg_rewind: syncing target data directory
+pg_rewind: Done!
+
+[pgs1]$ time pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P 2>&1 | tail -6
+     0/392784 kB (0%) copied
+154446/392784 kB (39%) copied
+392784/392784 kB (100%) copied
+pg_rewind: creating backup label and updating control file
+pg_rewind: syncing target data directory
+pg_rewind: Done!
+
+real	0m0.531s
+user	0m0.131s
+sys	0m0.130s
+
+[pgs1]# ls /var/lib/pgsql/17/data/standby.signal 2>&1; cat /var/lib/pgsql/17/data/postgresql.auto.conf
+ls: cannot access '/var/lib/pgsql/17/data/standby.signal': No such file or directory
+# Do not edit this file manually!
+# It will be overwritten by the ALTER SYSTEM command.
+primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=pgs1 port=5432 application_name=pgs2 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+primary_slot_name = 'pgs2'
+
+[pgs1]# runuser -u postgres -- touch /var/lib/pgsql/17/data/standby.signal; printf "%s\n" "primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'" "primary_slot_name = 'pgs1'" > /var/lib/pgsql/17/data/postgresql.auto.conf; chown postgres: /var/lib/pgsql/17/data/postgresql.auto.conf; systemctl start postgresql-17; sleep 5; systemctl is-active postgresql-17
+active
+
+[pgs1]# grep -hE "redo|consistent|streaming|timeline" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -5
+2026-10-24 15:34:44.516 CST [184] LOG:  starting backup recovery with redo LSN 0/3000028, checkpoint LSN 0/3000080, on timeline ID 1
+2026-10-24 15:34:44.517 CST [184] LOG:  redo starts at 0/3000028
+2026-10-24 15:34:44.517 CST [184] LOG:  completed backup recovery with redo LSN 0/3000028 and end LSN 0/3000120
+2026-10-24 15:34:44.837 CST [184] LOG:  consistent recovery state reached at 0/E9AABE8
+2026-10-24 15:34:44.846 CST [185] LOG:  started streaming WAL from primary at 0/E000000 on timeline 2
+
+[pgs1] postgres=# SELECT pg_is_in_recovery(), status, sender_host, received_tli FROM pg_stat_wal_receiver;
+ pg_is_in_recovery |  status   | sender_host | received_tli 
+-------------------+-----------+-------------+--------------
+ t                 | streaming | pgs2        |            2
+(1 row)
+
+
+[pgs2] postgres=# SELECT application_name, state, sync_state, replay_lag FROM pg_stat_replication ORDER BY 1;
+ application_name |   state   | sync_state |   replay_lag    
+------------------+-----------+------------+-----------------
+ pgs1             | streaming | quorum     | 00:00:00.0001
+ pgs3             | streaming | quorum     | 00:00:00.000318
+(2 rows)
+
+
+[pgs1] postgres=# SELECT 'pgs1' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
+ node | count | split_brain_rows | max  
+------+-------+------------------+------
+ pgs1 |  1006 |                0 | 1025
+(1 row)
+
+
+[pgs2] postgres=# SELECT 'pgs2' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
+ node | count | split_brain_rows | max  
+------+-------+------------------+------
+ pgs2 |  1006 |                0 | 1025
+(1 row)
+
+
+[pgs3] postgres=# SELECT 'pgs3' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
+ node | count | split_brain_rows | max  
+------+-------+------------------+------
+ pgs3 |  1006 |                0 | 1025
+(1 row)
+
+
+
+======== 錯誤日誌摘要 ========  (2026-10-24 15:34:50)
+[pgs1]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
+7
+      3 replicator@[unknown]/pgs1 192.168.59.21 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+      1 postgres@postgres/psql [local] ERROR:  cannot execute INSERT in a read-only transaction
+      1 FATAL:  terminating walreceiver process due to administrator command
+      1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+
+[pgs2]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
+7
+      3 replicator@[unknown]/pgs1 192.168.59.21 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+      1 postgres@postgres/psql [local] ERROR:  cannot execute INSERT in a read-only transaction
+      1 FATAL:  terminating walreceiver process due to administrator command
+      1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+
+[pgs3]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
+4
+      2 FATAL:  terminating walreceiver process due to administrator command
+      1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+

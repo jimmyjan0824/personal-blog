@@ -1,0 +1,4 @@
+[pg1]# PGPASSWORD=ChangeMe_App_2026 psql -X -h 127.0.0.1 -U app -d appdb -Atc "SELECT name, setting FROM pg_settings WHERE name LIKE 'tcp_keepalives%' ORDER BY 1"
+tcp_keepalives_count|6
+tcp_keepalives_idle|60
+tcp_keepalives_interval|10

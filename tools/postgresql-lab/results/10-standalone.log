@@ -1,0 +1,720 @@
+
+======== 環境 ========  (2026-10-24 15:17:56)
+[pg1]# cat /etc/rocky-release; uname -m; nproc; free -g | head -2; df -h / /dev/shm | sed 1d
+Rocky Linux release 9.8 (Blue Onyx)
+aarch64
+10
+               total        used        free      shared  buff/cache   available
+Mem:               7           0           5           0           1           7
+overlay         453G  8.5G  421G   2% /
+shm             1.0G     0  1.0G   0% /dev/shm
+
+
+======== 步驟 0：OS 參數 ========  (2026-10-24 15:17:56)
+[pg1]# cp /root/conf/99-postgresql.conf /etc/sysctl.d/99-postgresql.conf && sysctl -p /etc/sysctl.d/99-postgresql.conf
+vm.swappiness = 1
+vm.dirty_background_bytes = 67108864
+vm.dirty_bytes = 536870912
+net.core.somaxconn = 1024
+
+[pg1]# cat /sys/kernel/mm/transparent_hugepage/enabled; grep -E "HugePages_Total|Hugepagesize" /proc/meminfo
+[always] madvise never
+HugePages_Total:       0
+Hugepagesize:       2048 kB
+
+
+======== 步驟 1：安裝 PGDG 套件庫與 PostgreSQL 17 ========  (2026-10-24 15:17:56)
+[pg1]# dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm 2>&1 | grep -E "^Install|pgdg-redhat-repo|Complete"
+pgdg-redhat-repo-latest.noarch.rpm               95 kB/s |  15 kB     00:00    
+Installing:
+ pgdg-redhat-repo     noarch     42.0-70.rhel9PGDG       @commandline      15 k
+Install  1 Package
+Installed size: 20 k
+  Installing       : pgdg-redhat-repo-42.0-70.rhel9PGDG.noarch              1/1 
+  Running scriptlet: pgdg-redhat-repo-42.0-70.rhel9PGDG.noarch              1/1 
+  Verifying        : pgdg-redhat-repo-42.0-70.rhel9PGDG.noarch              1/1 
+Installed:
+  pgdg-redhat-repo-42.0-70.rhel9PGDG.noarch                                     
+Complete!
+
+[pg1]# dnf -qy module disable postgresql; dnf repolist --enabled | grep -i pgdg
+Importing GPG key 0xB9738825:
+ Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+ From       : /etc/pki/rpm-gpg/PGDG-RPM-GPG-KEY-AARCH64-RHEL
+Importing GPG key 0xB9738825:
+ Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+ From       : /etc/pki/rpm-gpg/PGDG-RPM-GPG-KEY-AARCH64-RHEL
+Importing GPG key 0xB9738825:
+ Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+ From       : /etc/pki/rpm-gpg/PGDG-RPM-GPG-KEY-AARCH64-RHEL
+Importing GPG key 0xB9738825:
+ Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+ From       : /etc/pki/rpm-gpg/PGDG-RPM-GPG-KEY-AARCH64-RHEL
+Importing GPG key 0xB9738825:
+ Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+ From       : /etc/pki/rpm-gpg/PGDG-RPM-GPG-KEY-AARCH64-RHEL
+Importing GPG key 0xB9738825:
+ Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+ From       : /etc/pki/rpm-gpg/PGDG-RPM-GPG-KEY-AARCH64-RHEL
+pgdg-common PostgreSQL common RPMs for RHEL / Rocky Linux / AlmaLinux 9.8 - aarch64
+pgdg14      PostgreSQL 14 for RHEL / Rocky Linux / AlmaLinux 9.8 - aarch64
+pgdg15      PostgreSQL 15 for RHEL / Rocky Linux / AlmaLinux 9.8 - aarch64
+pgdg16      PostgreSQL 16 for RHEL / Rocky Linux / AlmaLinux 9.8 - aarch64
+pgdg17      PostgreSQL 17 for RHEL / Rocky Linux / AlmaLinux 9.8 - aarch64
+pgdg18      PostgreSQL 18 for RHEL / Rocky Linux / AlmaLinux 9.8 - aarch64
+
+[pg1]# dnf install -y postgresql17-server postgresql17-contrib 2>&1 | grep -E "^Install|^ postgresql17|Importing GPG|Fingerprint|Key imported|Complete"
+Installing:
+ postgresql17-contrib     aarch64   17.11-1PGDG.rhel9.8       pgdg17      709 k
+ postgresql17-server      aarch64   17.11-1PGDG.rhel9.8       pgdg17      6.9 M
+Installing dependencies:
+ postgresql17             aarch64   17.11-1PGDG.rhel9.8       pgdg17      1.9 M
+ postgresql17-libs        aarch64   17.11-1PGDG.rhel9.8       pgdg17      340 k
+Installing weak dependencies:
+Install  66 Packages
+Installed size: 113 M
+Importing GPG key 0xB9738825:
+ Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
+Key imported successfully
+Installed:
+Complete!
+
+[pg1]# rpm -q postgresql17 postgresql17-libs postgresql17-server postgresql17-contrib; rpm -qi postgresql17-server | grep -E "^(Version|Release|Signature)"
+postgresql17-17.11-1PGDG.rhel9.8.aarch64
+postgresql17-libs-17.11-1PGDG.rhel9.8.aarch64
+postgresql17-server-17.11-1PGDG.rhel9.8.aarch64
+postgresql17-contrib-17.11-1PGDG.rhel9.8.aarch64
+Version     : 17.11
+Release     : 1PGDG.rhel9.8
+Signature   : RSA/SHA256, Tue Aug 11 21:20:36 2026, Key ID 177b343bb9738825
+
+[pg1]# /usr/pgsql-17/bin/postgres --version; which psql; psql --version
+postgres (PostgreSQL) 17.11
+/usr/pgsql-17/bin/psql
+psql (PostgreSQL) 17.11
+
+[pg1]# /usr/pgsql-17/bin/pg_config --configure | tr " " "\n" | grep -E "with-(lz4|zstd|llvm|systemd|openssl|icu|libxml|gssapi|ldap|pam|selinux)|system-tzdata"
+'--with-lz4'
+'--with-zstd'
+'--with-icu'
+'--with-llvm'
+'--with-openssl'
+'--with-pam'
+'--with-gssapi'
+'--with-libxml'
+'--with-ldap'
+'--with-selinux'
+'--with-systemd'
+'--with-system-tzdata=/usr/share/zoneinfo'
+
+[pg1]# id postgres; ls -ld /var/lib/pgsql /var/lib/pgsql/17 /var/lib/pgsql/17/data
+uid=26(postgres) gid=26(postgres) groups=26(postgres)
+drwx------ 3 postgres postgres 4096 Oct 24 07:18 /var/lib/pgsql
+drwx------ 4 postgres postgres 4096 Oct 24 07:18 /var/lib/pgsql/17
+drwx------ 2 postgres postgres 4096 Aug 11 19:50 /var/lib/pgsql/17/data
+
+
+======== 步驟 2：initdb ========  (2026-10-24 15:18:35)
+[pg1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb && cat /var/lib/pgsql/17/initdb.log
+Initializing database ... OK
+
+The files belonging to this database system will be owned by user "postgres".
+This user must also own the server process.
+
+The database cluster will be initialized with this locale configuration:
+  locale provider:   builtin
+  default collation: C.UTF-8
+  LC_COLLATE:  C.UTF-8
+  LC_CTYPE:    C.UTF-8
+  LC_MESSAGES: C.UTF-8
+  LC_MONETARY: C.UTF-8
+  LC_NUMERIC:  C.UTF-8
+  LC_TIME:     C.UTF-8
+The default text search configuration will be set to "english".
+
+Data page checksums are enabled.
+
+fixing permissions on existing directory /var/lib/pgsql/17/data ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... posix
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Etc/UTC
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    /usr/pgsql-17/bin/pg_ctl -D /var/lib/pgsql/17/data/ -l logfile start
+
+
+[pg1]# runuser -u postgres -- pg_controldata /var/lib/pgsql/17/data | grep -E "pg_control version|Catalog version|checksum|Database block size|WAL block size|Bytes per WAL segment"
+pg_control version number:            1700
+Catalog version number:               202406281
+Database block size:                  8192
+WAL block size:                       8192
+Bytes per WAL segment:                16777216
+Data page checksum version:           1
+
+[pg1]# ls -la /var/lib/pgsql/17/data
+total 132
+drwx------ 20 postgres postgres  4096 Oct 24 07:18 .
+drwx------  4 postgres postgres  4096 Oct 24 07:18 ..
+-rw-------  1 postgres postgres     3 Oct 24 07:18 PG_VERSION
+drwx------  5 postgres postgres  4096 Oct 24 07:18 base
+drwx------  2 postgres postgres  4096 Oct 24 07:18 global
+drwx------  2 postgres postgres  4096 Oct 24 07:18 log
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_commit_ts
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_dynshmem
+-rw-------  1 postgres postgres  5499 Oct 24 07:18 pg_hba.conf
+-rw-------  1 postgres postgres  2640 Oct 24 07:18 pg_ident.conf
+drwx------  4 postgres postgres  4096 Oct 24 07:18 pg_logical
+drwx------  4 postgres postgres  4096 Oct 24 07:18 pg_multixact
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_notify
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_replslot
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_serial
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_snapshots
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_stat
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_stat_tmp
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_subtrans
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_tblspc
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_twophase
+drwx------  4 postgres postgres  4096 Oct 24 07:18 pg_wal
+drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_xact
+-rw-------  1 postgres postgres    88 Oct 24 07:18 postgresql.auto.conf
+-rw-------  1 postgres postgres 30963 Oct 24 07:18 postgresql.conf
+
+
+======== 步驟 3：設定檔 ========  (2026-10-24 15:18:35)
+[pg1]# install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
+
+[pg1]# cd /var/lib/pgsql/17/data && cp postgresql.conf postgresql.conf.initdb && cp pg_hba.conf pg_hba.conf.initdb && install -o postgres -g postgres -m 600 /root/conf/postgresql-standalone.conf postgresql.conf && install -o postgres -g postgres -m 600 /root/conf/pg_hba-standalone.conf pg_hba.conf && ls -l postgresql.conf pg_hba.conf
+-rw------- 1 postgres postgres  1053 Oct 24 07:18 pg_hba.conf
+-rw------- 1 postgres postgres 16260 Oct 24 07:18 postgresql.conf
+
+[pg1]# grep -Ev "^\s*(#|$)" /var/lib/pgsql/17/data/postgresql.conf | wc -l
+143
+
+
+======== 步驟 4：systemd ========  (2026-10-24 15:18:36)
+[pg1]# systemctl cat postgresql-17 | grep -Ev "^\s*(#|$)"
+[Unit]
+Description=PostgreSQL 17 database server
+Documentation=https://www.postgresql.org/docs/17/static/
+After=syslog.target
+After=network-online.target
+[Service]
+Type=notify
+User=postgres
+Group=postgres
+Environment=PGDATA=/var/lib/pgsql/17/data/
+OOMScoreAdjust=-1000
+Environment=PG_OOM_ADJUST_FILE=/proc/self/oom_score_adj
+Environment=PG_OOM_ADJUST_VALUE=0
+ExecStartPre=/usr/pgsql-17/bin/postgresql-17-check-db-dir ${PGDATA}
+ExecStart=/usr/pgsql-17/bin/postgres -D ${PGDATA}
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+Restart=on-failure
+TimeoutSec=0
+TimeoutStartSec=0
+TimeoutStopSec=1h
+[Install]
+WantedBy=multi-user.target
+
+[pg1]# systemctl enable --now postgresql-17
+Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
+
+[pg1]# systemctl status postgresql-17 --no-pager | head -12
+● postgresql-17.service - PostgreSQL 17 database server
+     Loaded: loaded (/usr/lib/systemd/system/postgresql-17.service; enabled; preset: disabled)
+     Active: active (running) since Sat 2026-10-24 07:18:36 UTC; 69ms ago
+       Docs: https://www.postgresql.org/docs/17/static/
+    Process: 762 ExecStartPre=/usr/pgsql-17/bin/postgresql-17-check-db-dir ${PGDATA} (code=exited, status=0/SUCCESS)
+   Main PID: 767 (postgres)
+      Tasks: 8 (limit: 51007)
+     Memory: 120.1M (peak: 120.7M)
+        CPU: 40ms
+     CGroup: /docker/156c6767cb94efa79f592e0ee1ced63294b447ccfe292563c8346e2dc433ff32/system.slice/postgresql-17.service
+             ├─767 /usr/pgsql-17/bin/postgres -D /var/lib/pgsql/17/data/
+             ├─768 "postgres: logger "
+
+[pg1]# ls /var/lib/pgsql/17/data/log/; cat /var/lib/pgsql/17/data/log/postgresql-*.log
+postgresql-2026-10-24.log
+2026-10-24 15:18:36.397 CST [767] LOG:  starting PostgreSQL 17.11 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit
+2026-10-24 15:18:36.397 CST [767] LOG:  listening on IPv4 address "192.168.59.11", port 5432
+2026-10-24 15:18:36.398 CST [767] LOG:  listening on IPv6 address "::1", port 5432
+2026-10-24 15:18:36.398 CST [767] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-10-24 15:18:36.398 CST [767] LOG:  listening on Unix socket "/run/postgresql/.s.PGSQL.5432"
+2026-10-24 15:18:36.399 CST [767] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-10-24 15:18:36.400 CST [771] LOG:  database system was shut down at 2026-10-24 15:18:35 CST
+2026-10-24 15:18:36.402 CST [767] LOG:  database system is ready to accept connections
+
+[pg1]# grep -E "OOM|oom" /proc/$(head -1 /var/lib/pgsql/17/data/postmaster.pid)/oom_score_adj; cat /proc/$(head -1 /var/lib/pgsql/17/data/postmaster.pid)/limits | grep "open files"
+Max open files            1024                 1048576              files     
+
+
+======== 步驟 5：驗證 ========  (2026-10-24 15:18:36)
+[pg1] postgres=# SELECT version();
+                                                     version                                                      
+------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 17.11 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit
+(1 row)
+
+
+[pg1] postgres=# SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','effective_cache_size','work_mem','maintenance_work_mem','max_connections','wal_buffers','max_wal_size','random_page_cost','effective_io_concurrency','huge_pages','wal_compression','data_checksums','shared_preload_libraries','jit') ORDER BY name;
+           name           |      setting       | unit 
+--------------------------+--------------------+------
+ data_checksums           | on                 | 
+ effective_cache_size     | 1572864            | 8kB
+ effective_io_concurrency | 200                | 
+ huge_pages               | try                | 
+ jit                      | off                | 
+ maintenance_work_mem     | 1048576            | kB
+ max_connections          | 200                | 
+ max_wal_size             | 8192               | MB
+ random_page_cost         | 1.1                | 
+ shared_buffers           | 524288             | 8kB
+ shared_preload_libraries | pg_stat_statements | 
+ wal_buffers              | 2048               | 8kB
+ wal_compression          | lz4                | 
+ work_mem                 | 16384              | kB
+(14 rows)
+
+
+[pg1] postgres=# SHOW huge_pages_status;
+ huge_pages_status 
+-------------------
+ off
+(1 row)
+
+
+
+======== 設定檔 vs 實際值比對 ========  (2026-10-24 15:18:36)
+[pg1]# /root/bin/checkconf.sh /var/lib/pgsql/17/data/postgresql.conf
+--- pg_file_settings：沒有套用或有錯誤的設定（空的代表全部套用）
+ sourceline | name | setting | applied | error 
+------------+------+---------+---------+-------
+(0 rows)
+
+--- 設定檔參數數量與標記
+  tag   | count 
+--------+-------
+ initdb |     6
+ 建議   |    46
+ 預設   |    91
+(3 rows)
+
+--- 需要確認的項目（CHECK）；UNKNOWN 代表這個版本沒有這個參數
+ line | tag  |          name           | setting | boot_val | unit |       source       |    result     
+------+------+-------------------------+---------+----------+------+--------------------+---------------
+   25 | 建議 | tcp_keepalives_idle     | 0       | 0        | s    | configuration file | CHECK
+   27 | 建議 | tcp_keepalives_interval | 0       | 0        | s    | configuration file | CHECK
+   29 | 建議 | tcp_keepalives_count    | 0       | 0        |      | configuration file | CHECK
+  154 | 預設 | wal_buffers             | 2048    | -1       | 8kB  | override           | CHECK(source)
+(4 rows)
+
+--- 標「建議」的參數：實際值與預設值（boot_val，單位見 unit）
+                name                 |                                   setting                                    |            boot_val            | unit 
+-------------------------------------+------------------------------------------------------------------------------+--------------------------------+------
+ listen_addresses                    | 192.168.59.11, localhost                                                     | localhost                      | 
+ max_connections                     | 200                                                                          | 100                            | 
+ tcp_keepalives_idle                 | 0                                                                            | 0                              | s
+ tcp_keepalives_interval             | 0                                                                            | 0                              | s
+ tcp_keepalives_count                | 0                                                                            | 0                              | 
+ shared_buffers                      | 524288                                                                       | 16384                          | 8kB
+ work_mem                            | 16384                                                                        | 4096                           | kB
+ maintenance_work_mem                | 1048576                                                                      | 65536                          | kB
+ temp_file_limit                     | 20971520                                                                     | -1                             | kB
+ effective_io_concurrency            | 200                                                                          | 1                              | 
+ maintenance_io_concurrency          | 200                                                                          | 10                             | 
+ max_worker_processes                | 16                                                                           | 8                              | 
+ max_parallel_workers_per_gather     | 4                                                                            | 2                              | 
+ max_parallel_maintenance_workers    | 4                                                                            | 2                              | 
+ wal_compression                     | lz4                                                                          | off                            | 
+ checkpoint_timeout                  | 900                                                                          | 300                            | s
+ max_wal_size                        | 8192                                                                         | 1024                           | MB
+ min_wal_size                        | 2048                                                                         | 80                             | MB
+ archive_mode                        | on                                                                           | off                            | 
+ archive_command                     | test ! -f /var/lib/pgsql/17/archive/%f && cp %p /var/lib/pgsql/17/archive/%f |                                | 
+ max_slot_wal_keep_size              | 51200                                                                        | -1                             | MB
+ random_page_cost                    | 1.1                                                                          | 4                              | 
+ effective_cache_size                | 1572864                                                                      | 524288                         | 8kB
+ jit                                 | off                                                                          | on                             | 
+ logging_collector                   | on                                                                           | off                            | 
+ log_filename                        | postgresql-%Y-%m-%d.log                                                      | postgresql-%Y-%m-%d_%H%M%S.log | 
+ log_rotation_size                   | 0                                                                            | 10240                          | kB
+ log_truncate_on_rotation            | on                                                                           | off                            | 
+ log_min_duration_statement          | 1000                                                                         | -1                             | ms
+ log_lock_waits                      | on                                                                           | off                            | 
+ log_temp_files                      | 0                                                                            | -1                             | kB
+ log_autovacuum_min_duration         | 1000                                                                         | 600000                         | ms
+ log_line_prefix                     | %m [%p] %q%u@%d/%a %h                                                        | %m [%p]                        | 
+ log_timezone                        | Asia/Taipei                                                                  | GMT                            | 
+ track_io_timing                     | on                                                                           | off                            | 
+ track_wal_io_timing                 | on                                                                           | off                            | 
+ track_functions                     | pl                                                                           | none                           | 
+ track_activity_query_size           | 4096                                                                         | 1024                           | B
+ shared_preload_libraries            | pg_stat_statements                                                           |                                | 
+ autovacuum_max_workers              | 4                                                                            | 3                              | 
+ autovacuum_vacuum_scale_factor      | 0.05                                                                         | 0.2                            | 
+ autovacuum_analyze_scale_factor     | 0.05                                                                         | 0.1                            | 
+ autovacuum_vacuum_cost_limit        | 2000                                                                         | -1                             | 
+ idle_in_transaction_session_timeout | 600000                                                                       | 0                              | ms
+ default_toast_compression           | lz4                                                                          | pglz                           | 
+ timezone                            | Asia/Taipei                                                                  | GMT                            | 
+(46 rows)
+
+
+[pg1] postgres=# SELECT datname, encoding::int, pg_encoding_to_char(encoding) AS enc, datlocprovider, datlocale, datcollate, datctype FROM pg_database ORDER BY datname;
+  datname  | encoding | enc  | datlocprovider | datlocale | datcollate | datctype 
+-----------+----------+------+----------------+-----------+------------+----------
+ postgres  |        6 | UTF8 | b              | C.UTF-8   | C.UTF-8    | C.UTF-8
+ template0 |        6 | UTF8 | b              | C.UTF-8   | C.UTF-8    | C.UTF-8
+ template1 |        6 | UTF8 | b              | C.UTF-8   | C.UTF-8    | C.UTF-8
+(3 rows)
+
+
+
+======== 建立應用帳號與資料庫 ========  (2026-10-24 15:18:36)
+[pg1] postgres=# CREATE ROLE app LOGIN PASSWORD 'ChangeMe_App_2026';
+CREATE ROLE
+
+[pg1] postgres=# CREATE DATABASE appdb OWNER app;
+CREATE DATABASE
+
+[pg1] appdb=# CREATE EXTENSION pg_stat_statements;
+CREATE EXTENSION
+
+[pg1] postgres=# SELECT rolname, left(rolpassword, 14) AS pw_prefix FROM pg_authid WHERE rolname = 'app';
+ rolname |   pw_prefix    
+---------+----------------
+ app     | SCRAM-SHA-256$
+(1 row)
+
+
+[pg1]# PGPASSWORD=ChangeMe_App_2026 psql -X -h 192.168.59.11 -U app -d appdb -c "SELECT current_user, inet_server_addr(), ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+ current_user | inet_server_addr | ssl 
+--------------+------------------+-----
+ app          | 192.168.59.11    | f
+(1 row)
+
+
+[pg1]# PGPASSWORD=wrong psql -X -h 127.0.0.1 -U app -d appdb -c "SELECT 1"; tail -2 /var/lib/pgsql/17/data/log/postgresql-*.log
+psql: error: connection to server at "127.0.0.1", port 5432 failed: FATAL:  password authentication failed for user "app"
+2026-10-24 15:18:37.437 CST [881] app@appdb/[unknown] 127.0.0.1 FATAL:  password authentication failed for user "app"
+2026-10-24 15:18:37.437 CST [881] app@appdb/[unknown] 127.0.0.1 DETAIL:  Connection matched file "/var/lib/pgsql/17/data/pg_hba.conf" line 9: "host    all             all             127.0.0.1/32            scram-sha-256"
+
+
+======== pgbench（容器內，只確認服務正常，不代表正式主機效能） ========  (2026-10-24 15:18:37)
+[pg1]# PGPASSWORD=ChangeMe_App_2026 pgbench -h 127.0.0.1 -U app -i -s 20 -q appdb 2>&1 | tail -3
+vacuuming...
+creating primary keys...
+done in 1.14 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 0.85 s, vacuum 0.06 s, primary keys 0.22 s).
+
+[pg1]# PGPASSWORD=ChangeMe_App_2026 pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 30 -P 10 appdb 2>&1 | grep -vE "^pgbench \(|^starting"
+progress: 10.0 s, 13879.2 tps, lat 1.145 ms stddev 0.585, 0 failed
+progress: 20.0 s, 13903.4 tps, lat 1.145 ms stddev 0.681, 0 failed
+progress: 30.0 s, 13391.0 tps, lat 1.189 ms stddev 0.597, 0 failed
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 20
+query mode: simple
+number of clients: 16
+number of threads: 4
+maximum number of tries: 1
+duration: 30 s
+number of transactions actually processed: 411750
+number of failed transactions: 0 (0.000%)
+latency average = 1.159 ms
+latency stddev = 0.624 ms
+initial connection time = 19.023 ms
+tps = 13730.092491 (without initial connection time)
+
+[pg1]# PGPASSWORD=ChangeMe_App_2026 pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 20 -S appdb 2>&1 | grep -E "^(tps|latency average|number of transactions actually)"
+number of transactions actually processed: 4169767
+latency average = 0.077 ms
+tps = 208635.344032 (without initial connection time)
+
+[pg1] appdb=# SELECT left(query, 60) AS query, calls, round(mean_exec_time::numeric, 3) AS mean_ms, round(total_exec_time::numeric) AS total_ms FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 5;
+                            query                             |  calls  | mean_ms | total_ms 
+--------------------------------------------------------------+---------+---------+----------
+ UPDATE pgbench_branches SET bbalance = bbalance + $1 WHERE b |  411750 |   0.189 |    77715
+ SELECT abalance FROM pgbench_accounts WHERE aid = $1         | 4581517 |   0.005 |    23181
+ UPDATE pgbench_tellers SET tbalance = tbalance + $1 WHERE ti |  411750 |   0.034 |    13991
+ UPDATE pgbench_accounts SET abalance = abalance + $1 WHERE a |  411750 |   0.011 |     4613
+ INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VA |  411750 |   0.003 |     1125
+(5 rows)
+
+
+
+======== 平行查詢（確認 /dev/shm 夠用） ========  (2026-10-24 15:19:28)
+[pg1] appdb=# EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF) SELECT count(*) FROM pgbench_accounts;
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate (actual rows=1 loops=1)
+   ->  Gather (actual rows=5 loops=1)
+         Workers Planned: 4
+         Workers Launched: 4
+         ->  Partial Aggregate (actual rows=1 loops=5)
+               ->  Parallel Index Only Scan using pgbench_accounts_pkey on pgbench_accounts (actual rows=400000 loops=5)
+                     Heap Fetches: 2003501
+ Planning Time: 0.160 ms
+ Execution Time: 72.136 ms
+(9 rows)
+
+
+
+======== 慢查詢、暫存檔、鎖等待日誌 ========  (2026-10-24 15:19:29)
+[pg1] appdb=# SELECT pg_sleep(1.2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+
+[pg1] appdb=# SET work_mem = '1MB'; SELECT count(*) FROM (SELECT aid FROM pgbench_accounts ORDER BY abalance, filler) t;
+SET
+  count  
+---------
+ 2000000
+(1 row)
+
+
+[pg1]# (runuser -u postgres -- psql -X -d appdb -c "BEGIN; LOCK pgbench_branches; SELECT pg_sleep(3); COMMIT;" >/dev/null 2>&1 &) ; sleep 0.5; runuser -u postgres -- psql -X -d appdb -c "UPDATE pgbench_branches SET bbalance = bbalance WHERE bid = 1;"
+UPDATE 1
+
+[pg1]# grep -E "duration: [0-9]{4}|temporary file|still waiting|acquired" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -8
+2026-10-24 15:19:31.284 CST [1023] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp1023.0", size 40574976
+2026-10-24 15:19:31.284 CST [1024] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp1024.0", size 41910272
+2026-10-24 15:19:31.284 CST [1025] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp1025.0", size 39034880
+2026-10-24 15:19:31.289 CST [1021] postgres@appdb/psql [local] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp1021.0", size 41549824
+2026-10-24 15:19:32.904 CST [1038] postgres@appdb/psql [local] LOG:  process 1038 still waiting for RowExclusiveLock on relation 16434 of database 16385 after 1004.805 ms at character 8
+2026-10-24 15:19:34.449 CST [1036] postgres@appdb/psql [local] LOG:  duration: 3068.584 ms  statement: BEGIN; LOCK pgbench_branches; SELECT pg_sleep(3); COMMIT;
+2026-10-24 15:19:34.449 CST [1038] postgres@appdb/psql [local] LOG:  process 1038 acquired RowExclusiveLock on relation 16434 of database 16385 after 2550.420 ms at character 8
+2026-10-24 15:19:34.453 CST [1038] postgres@appdb/psql [local] LOG:  duration: 2554.201 ms  statement: UPDATE pgbench_branches SET bbalance = bbalance WHERE bid = 1;
+
+
+======== WAL 歸檔 ========  (2026-10-24 15:19:34)
+[pg1] postgres=# SELECT pg_switch_wal();
+ pg_switch_wal 
+---------------
+ 0/1AF48BA8
+(1 row)
+
+
+[pg1]# sleep 2; ls -l /var/lib/pgsql/17/archive | tail -3
+-rw------- 1 postgres postgres 16777216 Oct 24 07:19 000000010000000000000018
+-rw------- 1 postgres postgres 16777216 Oct 24 07:19 000000010000000000000019
+-rw------- 1 postgres postgres 16777216 Oct 24 07:19 00000001000000000000001A
+
+[pg1] postgres=# SELECT archived_count, last_archived_wal, failed_count FROM pg_stat_archiver;
+ archived_count |    last_archived_wal     | failed_count 
+----------------+--------------------------+--------------
+             26 | 00000001000000000000001A |            0
+(1 row)
+
+
+
+======== 重啟後資料仍在 ========  (2026-10-24 15:19:36)
+[pg1]# systemctl restart postgresql-17 && runuser -u postgres -- psql -X -d appdb -Atc "SELECT count(*) FROM pgbench_accounts"
+2000000
+
+
+======== 時鐘開銷（track_io_timing 的前提） ========  (2026-10-24 15:19:37)
+[pg1]# pg_test_timing -d 1 | head -8
+Testing timing overhead for 1 second.
+Per loop time including overhead: 16.40 ns
+Histogram of timing durations:
+  < us   % of total      count
+     1     98.37334   59978441
+     2      1.62394     990120
+     4      0.00013         78
+     8      0.00197       1201
+
+
+======== 錯誤日誌中的 WARNING / ERROR / FATAL ========  (2026-10-24 15:19:38)
+[pg1]# grep -E "WARNING|ERROR|FATAL|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log || echo "(none)"
+2026-10-24 15:18:37.437 CST [881] app@appdb/[unknown] 127.0.0.1 FATAL:  password authentication failed for user "app"
+
+
+======== 預設值：17 的 pg_settings（boot_val） ========  (2026-10-24 15:19:38)
+[pg1]# echo -n "17 參數數量："; runuser -u postgres -- psql -X -Atc "SELECT count(*) FROM pg_settings"
+17 參數數量：384
+
+
+======== 比較：在同一台安裝 PostgreSQL 18 ========  (2026-10-24 15:19:38)
+[pg1]# dnf install -y postgresql18-server postgresql18-contrib 2>&1 | grep -E "^ postgresql18|Complete"; rpm -q postgresql18-server; /usr/pgsql-18/bin/postgres --version
+ postgresql18-contrib    aarch64    18.6-1PGDG.rhel9.8       pgdg18       737 k
+ postgresql18-server     aarch64    18.6-1PGDG.rhel9.8       pgdg18       7.1 M
+ postgresql18            aarch64    18.6-1PGDG.rhel9.8       pgdg18       2.0 M
+ postgresql18-libs       aarch64    18.6-1PGDG.rhel9.8       pgdg18       301 k
+Complete!
+postgresql18-server-18.6-1PGDG.rhel9.8.aarch64
+postgres (PostgreSQL) 18.6
+
+[pg1]# runuser -u postgres -- /usr/pgsql-18/bin/initdb -D /var/lib/pgsql/18/data --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8 2>&1 | grep -Ev "^$"
+The files belonging to this database system will be owned by user "postgres".
+This user must also own the server process.
+The database cluster will be initialized with this locale configuration:
+  locale provider:   builtin
+  default collation: C.UTF-8
+  LC_COLLATE:  C.UTF-8
+  LC_CTYPE:    C.UTF-8
+  LC_MESSAGES: C.UTF-8
+  LC_MONETARY: C.UTF-8
+  LC_NUMERIC:  C.UTF-8
+  LC_TIME:     C.UTF-8
+The default text search configuration will be set to "english".
+Data page checksums are enabled.
+fixing permissions on existing directory /var/lib/pgsql/18/data ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... posix
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Etc/UTC
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+initdb: warning: enabling "trust" authentication for local connections
+initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+Success. You can now start the database server using:
+    /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -l logfile start
+
+[pg1]# runuser -u postgres -- /usr/pgsql-18/bin/pg_controldata /var/lib/pgsql/18/data | grep -E "pg_control version|Catalog version|checksum"
+pg_control version number:            1800
+Catalog version number:               202506291
+Data page checksum version:           1
+
+[pg1]# install -d -o postgres -g postgres -m 700 /var/lib/pgsql/18/archive; cd /var/lib/pgsql/18/data && sed -e "s#/var/lib/pgsql/17/#/var/lib/pgsql/18/#g" -e "s/^port = 5432/port = 5433/" -e "s/^listen_addresses = .*/listen_addresses = 'localhost'/" /root/conf/postgresql-standalone.conf > postgresql.conf && chown postgres: postgresql.conf && runuser -u postgres -- /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -l /var/lib/pgsql/18/startup.log -w start; cat /var/lib/pgsql/18/startup.log
+waiting for server to start.... done
+server started
+2026-10-24 15:19:45.386 CST [1302] LOG:  redirecting log output to logging collector process
+2026-10-24 15:19:45.386 CST [1302] HINT:  Future log output will appear in directory "log".
+
+[pg1]# cat /var/lib/pgsql/18/data/log/postgresql-*.log
+2026-10-24 15:19:45.386 CST [1302] LOG:  starting PostgreSQL 18.6 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit
+2026-10-24 15:19:45.386 CST [1302] LOG:  listening on IPv6 address "::1", port 5433
+2026-10-24 15:19:45.386 CST [1302] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2026-10-24 15:19:45.387 CST [1302] LOG:  listening on Unix socket "/run/postgresql/.s.PGSQL.5433"
+2026-10-24 15:19:45.388 CST [1302] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2026-10-24 15:19:45.389 CST [1309] LOG:  database system was shut down at 2026-10-24 15:19:44 CST
+2026-10-24 15:19:45.391 CST [1302] LOG:  database system is ready to accept connections
+
+[pg1]# /root/bin/checkconf.sh /var/lib/pgsql/18/data/postgresql.conf 5433 /usr/pgsql-18/bin/psql
+--- pg_file_settings：沒有套用或有錯誤的設定（空的代表全部套用）
+ sourceline | name | setting | applied | error 
+------------+------+---------+---------+-------
+(0 rows)
+
+--- 設定檔參數數量與標記
+  tag   | count 
+--------+-------
+ initdb |     6
+ 建議   |    46
+ 預設   |    91
+(3 rows)
+
+--- 需要確認的項目（CHECK）；UNKNOWN 代表這個版本沒有這個參數
+ line | tag  |          name           |  setting  | boot_val  | unit |       source       |    result     
+------+------+-------------------------+-----------+-----------+------+--------------------+---------------
+   13 | 建議 | listen_addresses        | localhost | localhost |      | configuration file | CHECK
+   15 | 預設 | port                    | 5433      | 5432      |      | configuration file | CHECK
+   25 | 建議 | tcp_keepalives_idle     | 0         | 0         | s    | configuration file | CHECK
+   27 | 建議 | tcp_keepalives_interval | 0         | 0         | s    | configuration file | CHECK
+   29 | 建議 | tcp_keepalives_count    | 0         | 0         |      | configuration file | CHECK
+  154 | 預設 | wal_buffers             | 2048      | -1        | 8kB  | override           | CHECK(source)
+  250 | 預設 | log_connections         | off       |           |      | configuration file | CHECK
+(7 rows)
+
+--- 標「建議」的參數：實際值與預設值（boot_val，單位見 unit）
+                name                 |                                   setting                                    |            boot_val            | unit 
+-------------------------------------+------------------------------------------------------------------------------+--------------------------------+------
+ listen_addresses                    | localhost                                                                    | localhost                      | 
+ max_connections                     | 200                                                                          | 100                            | 
+ tcp_keepalives_idle                 | 0                                                                            | 0                              | s
+ tcp_keepalives_interval             | 0                                                                            | 0                              | s
+ tcp_keepalives_count                | 0                                                                            | 0                              | 
+ shared_buffers                      | 524288                                                                       | 16384                          | 8kB
+ work_mem                            | 16384                                                                        | 4096                           | kB
+ maintenance_work_mem                | 1048576                                                                      | 65536                          | kB
+ temp_file_limit                     | 20971520                                                                     | -1                             | kB
+ effective_io_concurrency            | 200                                                                          | 16                             | 
+ maintenance_io_concurrency          | 200                                                                          | 16                             | 
+ max_worker_processes                | 16                                                                           | 8                              | 
+ max_parallel_workers_per_gather     | 4                                                                            | 2                              | 
+ max_parallel_maintenance_workers    | 4                                                                            | 2                              | 
+ wal_compression                     | lz4                                                                          | off                            | 
+ checkpoint_timeout                  | 900                                                                          | 300                            | s
+ max_wal_size                        | 8192                                                                         | 1024                           | MB
+ min_wal_size                        | 2048                                                                         | 80                             | MB
+ archive_mode                        | on                                                                           | off                            | 
+ archive_command                     | test ! -f /var/lib/pgsql/18/archive/%f && cp %p /var/lib/pgsql/18/archive/%f |                                | 
+ max_slot_wal_keep_size              | 51200                                                                        | -1                             | MB
+ random_page_cost                    | 1.1                                                                          | 4                              | 
+ effective_cache_size                | 1572864                                                                      | 524288                         | 8kB
+ jit                                 | off                                                                          | on                             | 
+ logging_collector                   | on                                                                           | off                            | 
+ log_filename                        | postgresql-%Y-%m-%d.log                                                      | postgresql-%Y-%m-%d_%H%M%S.log | 
+ log_rotation_size                   | 0                                                                            | 10240                          | kB
+ log_truncate_on_rotation            | on                                                                           | off                            | 
+ log_min_duration_statement          | 1000                                                                         | -1                             | ms
+ log_lock_waits                      | on                                                                           | off                            | 
+ log_temp_files                      | 0                                                                            | -1                             | kB
+ log_autovacuum_min_duration         | 1000                                                                         | 600000                         | ms
+ log_line_prefix                     | %m [%p] %q%u@%d/%a %h                                                        | %m [%p]                        | 
+ log_timezone                        | Asia/Taipei                                                                  | GMT                            | 
+ track_io_timing                     | on                                                                           | off                            | 
+ track_wal_io_timing                 | on                                                                           | off                            | 
+ track_functions                     | pl                                                                           | none                           | 
+ track_activity_query_size           | 4096                                                                         | 1024                           | B
+ shared_preload_libraries            | pg_stat_statements                                                           |                                | 
+ autovacuum_max_workers              | 4                                                                            | 3                              | 
+ autovacuum_vacuum_scale_factor      | 0.05                                                                         | 0.2                            | 
+ autovacuum_analyze_scale_factor     | 0.05                                                                         | 0.1                            | 
+ autovacuum_vacuum_cost_limit        | 2000                                                                         | -1                             | 
+ idle_in_transaction_session_timeout | 600000                                                                       | 0                              | ms
+ default_toast_compression           | lz4                                                                          | pglz                           | 
+ timezone                            | Asia/Taipei                                                                  | GMT                            | 
+(46 rows)
+
+
+[pg1] postgres=# SELECT name, setting FROM pg_settings WHERE name IN ('io_method','io_workers','io_combine_limit','io_max_combine_limit','effective_io_concurrency','maintenance_io_concurrency','autovacuum_worker_slots','autovacuum_vacuum_max_threshold','data_checksums','md5_password_warnings','idle_replication_slot_timeout','max_active_replication_origins','track_cost_delay_timing','log_lock_failures','vacuum_max_eager_freeze_failure_rate','vacuum_truncate','log_connections') ORDER BY name;
+                 name                 |  setting  
+--------------------------------------+-----------
+ autovacuum_vacuum_max_threshold      | 100000000
+ autovacuum_worker_slots              | 16
+ data_checksums                       | on
+ effective_io_concurrency             | 200
+ idle_replication_slot_timeout        | 0
+ io_combine_limit                     | 16
+ io_max_combine_limit                 | 16
+ io_method                            | worker
+ io_workers                           | 3
+ log_connections                      | off
+ log_lock_failures                    | off
+ maintenance_io_concurrency           | 200
+ max_active_replication_origins       | 10
+ md5_password_warnings                | on
+ track_cost_delay_timing              | off
+ vacuum_max_eager_freeze_failure_rate | 0.03
+ vacuum_truncate                      | on
+(17 rows)
+
+
+[pg1]# echo -n "18 參數數量："; runuser -u postgres -- /usr/pgsql-18/bin/psql -X -p 5433 -Atc "SELECT count(*) FROM pg_settings"
+18 參數數量：404
+
+[pg1]# runuser -u postgres -- /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -m fast stop
+waiting for server to shut down.... done
+server stopped
+
