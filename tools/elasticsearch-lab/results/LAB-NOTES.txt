@@ -33,3 +33,105 @@ Host
 - Diff 8.19 -> 9.5: node 247, index 57, threadpool 9 lines (ADD/DEL/CHG)
 
 Cleanup: docker compose down -v (images kept)
+
+==========================================================================================
+Phase 2 — 10-single-node / 20-cluster / 30-rolling-upgrade / 40-lag, run 2026-10-24 on the same Mac
+==========================================================================================
+Fixes (no conf/*.yml, *.yaml, heap or override values were changed)
+F1. 10/20/30/40-*.sh were committed without the exec bit -> "permission denied"; chmod +x.
+F2. compose.yaml: Docker Desktop gives containers RLIMIT_MEMLOCK = unlimited (not 8 MB as the compose
+    comment assumed), and systemd 252 on Rocky 9 passes PID 1's limit to services, so mlockall succeeded
+    without LimitMEMLOCK. Added `ulimits: { memlock: 8388608 }` to x-node to mimic a real Rocky 9 host
+    (verified: without override the ES process gets 8 MiB soft/hard, with override unlimited).
+F3. lib.sh curl_cmd: the phase-1 "connect to localhost" fallback broke when network.host is a specific IP
+    (es1, esd8). Now verifies the cert as "localhost" but connects to the node via
+    `--connect-to localhost:9200:<node>:9200` (only when the node still has the auto-config http_ca.crt).
+F4. 10-single-node.sh
+    - after 實測踩坑 1 and after every tryconf: `systemctl stop` before reset-failed. Otherwise a start that
+      unexpectedly succeeds leaves ES running and all later `systemctl start` calls are no-ops (that is
+      what happened on the first run: tryconf 2-4 all reported "active").
+    - tryconf also prints the real reason (the Exception line after "fatal exception" in es-single.log);
+      journalctl only shows the generic "Elasticsearch did not exit normally".
+    - snap is a named volume and survives `compose rm`: clear /mnt/es-snapshots/single{,8} at start
+      (2nd run failed with snapshot_name_already_in_use_exception for snap-1).
+    - after `systemctl restart`: wait until health is green before the GET (immediately after restart the
+      .security-7 shard is not yet available -> 503 "failed to retrieve password hash for reserved user").
+    - thread_pool defaults query: dropped flat_settings=true (filter_path with dotted keys cannot match flat
+      keys -> returned {}).
+    - esd8 (8.19 with elasticsearch-single.yml, auto-config certs issued to buildkitsandbox):
+      reset-password now uses `--url https://esd8:9200 -E xpack.security.http.ssl.verification_mode=certificate`;
+      also prints the "unknown setting" line from es-single.log.
+F5. 20-cluster.sh test 1: allocation explain now targets an UNASSIGNED orders replica (found via _cat/shards).
+    Fixed shard 0 was sometimes on a surviving node ("current_state: started"); with no body ES picked a
+    system index (.ds-ilm-history, default 1m delay) instead of orders (5m from the template).
+
+10-single-node.sh (9.5.5 on es1; final clean run 21:37-21:40)
+- dnf install elasticsearch-9.5.5 on a running container: 1m27s (download + auto-config)
+- 實測踩坑 1 (memory_lock: true, no LimitMEMLOCK) did NOT fail: with discovery.type: single-node the
+  bootstrap checks are not enforced, ES starts and only logs
+    WARN NativeAccess  Unable to lock JVM Memory: error=12 ... Increase RLIMIT_MEMLOCK, soft limit: 8388608
+    WARN BootstrapChecks memory locking requested for elasticsearch process but memory is not locked
+  -> the article must not claim "拒絕啟動" for single-node; it is enforced only when bootstrap checks are
+  enforced (multi-node / non-single-node discovery). After the override: mlockall=true, locked memory unlimited.
+- tryconf (expected failures, all failed with exit 1):
+    2: setting [cluster.initial_master_nodes] is not allowed when [discovery.type] is set to [single-node]
+    3: unknown setting [cluster.routing.allocation.disk.watermark.enable_for_single_data_node] did you mean any of
+       [cluster.routing.allocation.disk.watermark.flood_stage.frozen, cluster.routing.allocation.disk.watermark.flood_stage]?
+    4: unknown setting [indices.memory.index_buffer_sizes] did you mean any of [indices.memory.index_buffer_size,
+       indices.memory.max_index_buffer_size, indices.memory.min_index_buffer_size]?
+- systemctl enable --now: 7.5 s; restart: 14.3 s, .security usable ~1 s after restart returns
+- heap 1g (lab-heap.options), compressed oops true
+- checkconf: elasticsearch-single.yml 69 params, ok 69 (建議 8 / 必要 13 / 預設 48), no CHECK/UNKNOWN;
+  index-template-single.yaml 40 params, ok 40, no CHECK/UNKNOWN
+- bulk 300k docs (5000/batch): 3.6 s, ~84k docs/s, 0 failed; 34.5 MB, 4 segments; snapshot snap-1 ~1.0 s
+- slow log at 0ms works (user.name included); http:// on 9200 -> curl (52) empty reply (expected); no-auth -> 401
+- WARN noise on 9.5.5 aarch64: "GPU based vector indexing is not supported on this platform; cuvs-java supports
+  only x86", "SLF4J(W): No SLF4J providers were found", "OpenTelemetry API usage issue detected",
+  journal "WARNING: Unknown module: org.apache.arrow.memory.core specified to --add-opens" (from jvm.options).
+- deprecation log: [xpack.monitoring.collection.enabled] setting was deprecated (x6) — this setting is in
+  elasticsearch-single.yml; plus dot-prefixed index name notices (system).
+15-single-node-8.19.log (same yml on 8.19.23 / esd8)
+- first start fails as expected: java.lang.IllegalArgumentException: unknown setting
+  [cluster.state.encryption.required] please check that any required plugins are installed, or check the
+  breaking changes documentation for removed settings
+- after deleting that line: start 7.0 s, version 8.19.23 / Lucene 9.12.2
+- checkconf vs 8.19 defaults: 68 params, ok 67, 1 CHECK:
+    line 161 預設 thread_pool.search.queue_size file=16000 default(8.19)=1000 actual=16000
+  (16000 is the 9.x default; on 8.19 it is an explicit change, so the "預設" tag only holds for 9.x)
+
+20-cluster.sh (esc1~esc3, 9.5.5, own CA; final clean run 21:53-21:59; 3 runs total, all consistent)
+- bootstrap: cluster formed 14-20 s after the 3 starts; reset-password OK on own certs
+- mlockall true on all 3 (override present); heap 1g each
+- checkconf: elasticsearch-cluster.yml 83 params, ok 83, no CHECK/UNKNOWN;
+  index-template.yaml 41 params, ok 40, 1 CHECK(actual): index.number_of_shards file=1 actual=3 — expected,
+  the script creates orders with an explicit number_of_shards: 3 overriding the template
+- test 1 (pause a non-master data node): node-left after 33-34 s ("followers check retry count exceeded
+  [timeouts=3, failures=0]"); health yellow with delayed_unassigned_shards=4; allocation explain on orders:
+  "...waiting for it to return. If the node does not return within [4.9m]..." configured_delay 300000 ms
+  (template value 5m). System indices use the default 1m (ilm-history explain showed configured_delay 60000).
+  Writes during the outage succeed with _shards total 2 / successful 1. After unpause: green in 2-4 s
+  (replicas recovered with 0-1 translog ops, no file copy).
+- test 2 (pause the master): leader failure detected ~33 s (onLeaderFailure), election < 0.1 s afterwards,
+  BUT the new master's first publication waits the full cluster.publish.timeout (30 s) for the paused old
+  master, so _cat/master on the observer showed the new master after 63-64 s in runs 2 and 3 (33 s in run 1).
+  Seen in run 1 WARNs (esc2): "after [30s] publication of cluster state version [..] is still waiting for {<old master>}". Writes OK after.
+  After unpause: green in 2-4 s.
+- test 3 (stop 2 of 3) — result depends on whether the surviving node holds a copy of .security-7
+  (1 primary + 1 replica on 3 nodes):
+    run 1 (survivor had a copy): health -> 503 master_not_discovered_exception; write -> 503
+      cluster_block_exception "blocked by: [SERVICE_UNAVAILABLE/2/no master]"; _count still answered from the
+      local shards only (200026 of 300001 — silently partial, filter_path hid _shards)
+    final run (survivor had no copy): every request incl. health -> 401 security_exception "unable to
+      authenticate user [elastic]" (native/reserved user hashes live in .security) — the committed log shows this
+  Log in both: "master not discovered or elected yet, an election requires at least 2 nodes with ids from [...]".
+  Quorum regained: master elected 13-14 s after `systemctl start` of the 2nd node.
+- test 4 rolling restart (master last), per node incl. flush + wait green: esc1 44 s, esc2 12-13 s, esc3 17-18 s.
+  `systemctl restart` alone: 41.6-42.6 s on the first node every run, then 10.6 s and 15-16 s.
+  After restart each node logs (until initial_master_nodes is removed): "this node is locked into cluster UUID
+  [...] but [cluster.initial_master_nodes] is set to [esc1, esc2, esc3]; remove this setting to avoid possible
+  data loss caused by subsequent cluster bootstrap attempts" — the script removes the line during this test.
+- test 5 snapshot/restore: SLM execute -> SUCCESS in ~1 s (600 ms); delete orders + restore -> green in 1-2 s;
+  count 300003 matches
+- test 6 add esc4 (data, ingest): systemctl start 12.6-13.4 s; joined + rebalanced (green, 0 relocating) 14-15 s
+  after start; allocation esc1 4 / esc2 4 / esc3 3 / esc4 3 shards; drain via exclude._name: 2 s
+- no OOM / container kills; VM 7.7 GiB with 4 ES nodes at 1g heap each
