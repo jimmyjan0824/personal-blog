@@ -14,6 +14,11 @@ sed -e 's/^cluster.name: .*/cluster.name: es-dr/' -e 's/^node.roles: .*/node.rol
     conf/elasticsearch-cluster.yml > conf/elasticsearch-dr.yml
 docker compose rm -sf $N esd9 >/dev/null 2>&1; docker compose up -d $N esd9; sleep 5
 # 每秒印一次 orders 各分片副本的 seq_no 與狀態
+# 實際落後：leader 叢集上 orders 各主分片的 global checkpoint 加總 - follower 的 follower_global_checkpoint 加總
+# （_ccr/stats 裡的 leader_global_checkpoint 是 follower 上次讀到的值，斷線或讀取變慢時會停在舊值，不能單獨拿來算落後）
+leader_gcp() { eq esc1 GET '/_cat/shards/orders?h=prirep,seq_no.global_checkpoint' | awk '$1=="p" {s+=$2} END {print s+0}'; }
+follower_gcp() { eq esd9 GET /orders-follower/_ccr/stats | jq '[.indices[0].shards[].follower_global_checkpoint] | add' 2>/dev/null; }
+real_lag() { local l f; f=$(follower_gcp); l=$(leader_gcp); case "$f" in ''|null) echo "?";; *) echo $((l-f));; esac; }
 shard_seq() { eq $1 GET '/_cat/shards/orders?h=shard,prirep,state,node,seq_no.max,seq_no.local_checkpoint,seq_no.global_checkpoint&s=shard,prirep' | tr -s ' '; }
 {
 note "建置 es-prod（esc1~esc3）與 es-dr（esd9），步驟同 20-cluster.sh"
@@ -72,14 +77,15 @@ e esd9 POST /orders-follower/_ccr/pause_follow
 e esd9 POST /orders-follower/_ccr/resume_follow '{"max_read_request_operation_count":500,"max_outstanding_read_requests":1}'
 (docker compose exec -T esc1 bash -c 'ES_PW=ChangeMe_Elastic_2026 /root/bin/bulk-load.sh esc1 orders /tmp/o3.ndjson 5000' > results/40-bulk.out 2>&1 &)
 T0=$(date +%s)
-echo "# 每 2 秒取樣：落後操作數 = Σ(leader_global_checkpoint - follower_global_checkpoint)，time_since_last_read 取最大值"
+echo "# 每 2 秒取樣：ops_behind_stats = _ccr/stats 的 Σ(leader_global_checkpoint - follower_global_checkpoint)；ops_behind = leader 叢集實際 global checkpoint - follower；time_since_last_read 取最大值"
 for i in $(seq 1 150); do
   st=$(eq esd9 GET /orders-follower/_ccr/stats)
   lag=$(echo "$st" | jq '[.indices[0].shards[] | (.leader_global_checkpoint - .follower_global_checkpoint)] | add')
   tsl=$(echo "$st" | jq '[.indices[0].shards[] | .time_since_last_read_millis] | max')
   lc=$(eq esc1 GET /orders/_count | jq .count); fc=$(eq esd9 GET /orders-follower/_count | jq .count)
-  echo "t=$(( $(date +%s)-T0 ))s ops_behind=$lag time_since_last_read_ms=$tsl leader_docs=$lc follower_docs=$fc"
-  [ "$lag" = 0 ] && [ "$lc" = "$fc" ] && [ $(( $(date +%s)-T0 )) -gt 10 ] && break
+  rl=$(real_lag)
+  echo "t=$(( $(date +%s)-T0 ))s ops_behind=$rl ops_behind_stats=$lag time_since_last_read_ms=$tsl leader_docs=$lc follower_docs=$fc"
+  [ "$rl" = 0 ] && [ "$lc" = "$fc" ] && [ $(( $(date +%s)-T0 )) -gt 10 ] && break
   sleep 2
 done
 cat results/40-bulk.out; rm -f results/40-bulk.out
@@ -95,12 +101,13 @@ echo "（斷線期間 esd9 的 9200 也連不到：network.host 只綁 192.168.6
 e esc1 GET '/orders/_count'
 T0=$(date +%s); h "docker network connect --ip 192.168.60.41 $NET $(docker compose ps -q esd9)"
 for i in $(seq 1 120); do
-  lag=$(eq esd9 GET /orders-follower/_ccr/stats | jq '[.indices[0].shards[] | (.leader_global_checkpoint - .follower_global_checkpoint)] | add')
-  echo "t=$(( $(date +%s)-T0 ))s ops_behind=$lag"; [ "$lag" = 0 ] && break; sleep 2
+  rl=$(real_lag); fc=$(eq esd9 GET /orders-follower/_count | jq .count 2>/dev/null)
+  echo "t=$(( $(date +%s)-T0 ))s ops_behind=$rl follower_docs=${fc:-?}"; [ "$rl" = 0 ] && break; sleep 2
 done
 e esc1 GET '/orders/_count'
+e esd9 POST '/orders-follower/_refresh?filter_path=_shards'
 e esd9 GET '/orders-follower/_count'
-x esd9 "grep -E 'ccr|remote' /var/log/elasticsearch/es-dr.log | grep -E 'WARN|ERROR' | cut -c1-300 | sed -E 's/^\[[^]]+\]//' | sort | uniq -c | head -8 || echo '(none)'"
+x esd9 "grep -iE 'ccr|remote|ShardFollow' /var/log/elasticsearch/es-dr.log | grep -E 'WARN|ERROR' | cut -c1-300 | sed -E 's/^\[[^]]+\]//' | sort | uniq -c | head -8 || echo '(none)'"
 x esc1 'rm -rf /mnt/es-snapshots/.dist'
 } 2>&1 | tee results/40-lag.log
 rm -f conf/elasticsearch-dr.yml

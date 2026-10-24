@@ -1,0 +1,360 @@
+
+======== 建置 es-prod（esc1~esc3）與 es-dr（esd9），步驟同 20-cluster.sh ========  (2026-10-24 22:41:59)
+（es-prod 組成：等了 20 秒）
+（esc1 active：等了 0 秒）
+（esc2 active：等了 0 秒）
+（esc3 active：等了 1 秒）
+（esd9 active：等了 0 秒）
+{}
+{}
+[esc1] GET /_cat/nodes?v&h=name,version,node.role,master
+name version node.role master
+esc2 9.5.5   dim       -
+esc3 9.5.5   dim       -
+esc1 9.5.5   dim       *
+
+
+[esd9] GET /_cat/nodes?v&h=name,version,node.role,master
+name version node.role master
+esd9 9.5.5   dimr      *
+
+
+[esc1] PUT /_component_template/base-settings
+（body：/root/conf/index-template.yaml）
+---
+acknowledged: true
+
+
+[esc1] PUT /_index_template/apps
+{"index_patterns":["orders*","app-*"],"composed_of":["base-settings"],"priority":200,"version":1}
+{"acknowledged":true}
+
+[esc1] PUT /orders
+{"settings":{"index.number_of_shards":3},"mappings":{"dynamic":"strict","properties":{"order_id":{"type":"keyword"},"customer_id":{"type":"keyword"},"status":{"type":"keyword"},"amount":{"type":"scaled_float","scaling_factor":100},"region":{"type":"keyword"},"product":{"type":"keyword"},"qty":{"type":"integer"},"created_at":{"type":"date"},"note":{"type":"text"}}}}
+{"acknowledged":true,"shards_acknowledged":true,"index":"orders"}
+
+[esc1]# /root/bin/gen-orders.sh 100000 1 > /tmp/o1.ndjson; /root/bin/gen-orders.sh 200000 100001 > /tmp/o2.ndjson; /root/bin/gen-orders.sh 200000 300001 > /tmp/o3.ndjson; ES_PW=ChangeMe_Elastic_2026 /root/bin/bulk-load.sh esc1 orders /tmp/o1.ndjson 5000
+docs=100000 batches=20 failed=0 seconds=2.9 docs/s=34457
+
+（green：等了 0 秒）
+
+======== A-1：正常狀態下，主分片與副本的 seq_no / checkpoint（同步複製，三個值都相同） ========  (2026-10-24 22:42:42)
+[esc1] GET /_cat/shards/orders?v&h=shard,prirep,state,node,docs,seq_no.max,seq_no.local_checkpoint,seq_no.global_checkpoint&s=shard,prirep
+shard prirep state   node  docs seq_no.max seq_no.local_checkpoint seq_no.global_checkpoint
+0     p      STARTED esc2 23501      33583                   33583                    33583
+0     r      STARTED esc1 23501      33583                   33583                    33583
+1     p      STARTED esc1 23167      33086                   33086                    33086
+1     r      STARTED esc3 23246      33086                   33086                    33086
+2     p      STARTED esc3 21629      33328                   33328                    33328
+2     r      STARTED esc2 21629      33328                   33328                    33328
+
+
+[esc1] GET /orders/_stats?level=shards&filter_path=indices.orders.shards.0.routing.node,indices.orders.shards.0.routing.primary,indices.orders.shards.0.seq_no,indices.orders.shards.0.retention_leases.leases&pretty
+{
+  "indices" : {
+    "orders" : {
+      "shards" : {
+        "0" : [
+          {
+            "routing" : {
+              "primary" : false,
+              "node" : "uNbxgWGpToys9G3loYAcVg"
+            },
+            "seq_no" : {
+              "max_seq_no" : 33583,
+              "local_checkpoint" : 33583,
+              "global_checkpoint" : 33583
+            },
+            "retention_leases" : {
+              "leases" : [
+                {
+                  "id" : "peer_recovery/-aiTN7aPQy2oQ3fcGmW4bQ",
+                  "retaining_seq_no" : 0,
+                  "timestamp" : 1792852958856,
+                  "source" : "peer recovery"
+                },
+                {
+                  "id" : "peer_recovery/uNbxgWGpToys9G3loYAcVg",
+                  "retaining_seq_no" : 0,
+                  "timestamp" : 1792852958856,
+                  "source" : "peer recovery"
+                }
+              ]
+            }
+          },
+          {
+            "routing" : {
+              "primary" : true,
+              "node" : "-aiTN7aPQy2oQ3fcGmW4bQ"
+            },
+            "seq_no" : {
+              "max_seq_no" : 33583,
+              "local_checkpoint" : 33583,
+              "global_checkpoint" : 33583
+            },
+            "retention_leases" : {
+              "leases" : [
+                {
+                  "id" : "peer_recovery/-aiTN7aPQy2oQ3fcGmW4bQ",
+                  "retaining_seq_no" : 0,
+                  "timestamp" : 1792852958856,
+                  "source" : "peer recovery"
+                },
+                {
+                  "id" : "peer_recovery/uNbxgWGpToys9G3loYAcVg",
+                  "retaining_seq_no" : 0,
+                  "timestamp" : 1792852958856,
+                  "source" : "peer recovery"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+
+
+======== A-2：esc3 停機期間寫入 20 萬筆，再啟動 esc3，觀察副本追上主分片 ========  (2026-10-24 22:42:43)
+[esc3]# systemctl stop elasticsearch && echo stopped
+stopped
+
+（esc3 離開：等了 0 秒）
+[esc1]# ES_PW=ChangeMe_Elastic_2026 /root/bin/bulk-load.sh esc1 orders /tmp/o2.ndjson 5000
+docs=200000 batches=40 failed=0 seconds=2.2 docs/s=92585
+
+[esc1] GET /_cluster/health?filter_path=status,unassigned_shards,delayed_unassigned_shards
+{"status":"yellow","unassigned_shards":4,"delayed_unassigned_shards":4}
+
+[esc1] GET /_cat/shards/orders?v&h=shard,prirep,state,node,unassigned.reason,seq_no.max,seq_no.global_checkpoint&s=shard,prirep
+shard prirep state      node unassigned.reason seq_no.max seq_no.global_checkpoint
+0     p      STARTED    esc2                       100177                   100177
+0     r      STARTED    esc1                       100177                   100177
+1     p      STARTED    esc1                        99779                    99779
+1     r      UNASSIGNED      NODE_LEFT                                            
+2     p      STARTED    esc2                       100041                   100041
+2     r      UNASSIGNED      NODE_LEFT                                            
+
+
+[esc3]# systemctl start elasticsearch && echo started
+started
+
+# 每秒取樣（秒數從 esc3 start 指令完成起算）：shard prirep state node seq_no.max local_checkpoint global_checkpoint
+--- t=13s
+0 r STARTED esc1 100177 100177 100177
+1 r INITIALIZING esc3 
+2 r INITIALIZING esc3 
+--- t=14s
+0 r STARTED esc1 100177 100177 100177
+1 r INITIALIZING esc3 
+2 r INITIALIZING esc3 
+--- t=15s
+0 r STARTED esc1 100177 100177 100177
+1 r INITIALIZING esc3 
+2 r INITIALIZING esc3 
+--- t=17s
+0 r STARTED esc1 100177 100177 100177
+1 r STARTED esc3 99779 99779 99779
+2 r STARTED esc3 100041 100041 100041
+green：esc3 start 後 17 秒
+[esc1] GET /_cat/recovery/orders?v&h=shard,type,stage,source_node,target_node,files,files_percent,bytes,translog_ops,translog_ops_percent,time&active_only=false&s=shard
+shard type        stage source_node target_node files files_percent bytes translog_ops translog_ops_percent time
+0     peer        done  esc2        esc1        1     100.0%        227b  0            100.0%               131ms
+0     empty_store done  n/a         esc2        0     0.0%          0b    0            100.0%               35ms
+1     empty_store done  n/a         esc1        0     0.0%          0b    0            100.0%               27ms
+1     peer        done  esc1        esc3        0     0.0%          0b    66693        100.0%               3.2s
+2     peer        done  esc2        esc3        0     0.0%          0b    66713        100.0%               3.2s
+2     peer        done  esc3        esc2        1     100.0%        227b  0            100.0%               78ms
+
+
+[esc1] GET /_cat/shards/orders?v&h=shard,prirep,state,node,docs,seq_no.max,seq_no.local_checkpoint,seq_no.global_checkpoint&s=shard,prirep
+shard prirep state   node   docs seq_no.max seq_no.local_checkpoint seq_no.global_checkpoint
+0     p      STARTED esc2 100178     100177                  100177                   100177
+0     r      STARTED esc1 100178     100177                  100177                   100177
+1     p      STARTED esc1  99780      99779                   99779                    99779
+1     r      STARTED esc3  99780      99779                   99779                    99779
+2     p      STARTED esc2 100042     100041                  100041                   100041
+2     r      STARTED esc3 100042     100041                  100041                   100041
+
+
+
+======== B-1：CCR 設定（兩邊都要 Platinum 以上授權，這裡用 30 天試用） ========  (2026-10-24 22:43:05)
+[esc1] POST /_license/start_trial?acknowledge=true
+{"acknowledged":true,"trial_was_started":true,"type":"trial"}
+
+[esd9] POST /_license/start_trial?acknowledge=true
+{"acknowledged":true,"trial_was_started":true,"type":"trial"}
+
+[esd9] PUT /_cluster/settings
+{"persistent":{"cluster.remote.prod.mode":"sniff","cluster.remote.prod.seeds":["esc1:9300","esc2:9300","esc3:9300"]}}
+{"acknowledged":true,"persistent":{"cluster":{"remote":{"prod":{"mode":"sniff","seeds":["esc1:9300","esc2:9300","esc3:9300"]}}}},"transient":{}}
+
+（remote 連線：等了 0 秒）
+[esd9] GET /_remote/info?pretty
+{
+  "prod" : {
+    "connected" : true,
+    "mode" : "sniff",
+    "seeds" : [
+      "esc1:9300",
+      "esc2:9300",
+      "esc3:9300"
+    ],
+    "num_nodes_connected" : 3,
+    "max_connections_per_cluster" : 3,
+    "initial_connect_timeout" : "30s",
+    "skip_unavailable" : true
+  }
+}
+
+
+[esd9] PUT /orders-follower/_ccr/follow?wait_for_active_shards=1
+{"remote_cluster":"prod","leader_index":"orders"}
+{"follow_index_created":true,"follow_index_shards_acked":true,"index_following_started":true}
+
+（follower 追上（文件數相同）：等了 6 秒）
+建立 follower 到文件數相同：6 秒（含初始的檔案複製）
+[esd9] GET /orders-follower/_ccr/stats?filter_path=indices.shards.shard_id,indices.shards.leader_global_checkpoint,indices.shards.leader_max_seq_no,indices.shards.follower_global_checkpoint,indices.shards.follower_max_seq_no,indices.shards.outstanding_read_requests,indices.shards.time_since_last_read_millis,indices.shards.total_read_time_millis,indices.shards.operations_read&pretty
+{
+  "indices" : [
+    {
+      "shards" : [
+        {
+          "shard_id" : 0,
+          "leader_global_checkpoint" : 100177,
+          "leader_max_seq_no" : 100177,
+          "follower_global_checkpoint" : 100177,
+          "follower_max_seq_no" : 100177,
+          "outstanding_read_requests" : 1,
+          "total_read_time_millis" : 4159,
+          "operations_read" : 100178,
+          "time_since_last_read_millis" : 5391
+        },
+        {
+          "shard_id" : 1,
+          "leader_global_checkpoint" : 99779,
+          "leader_max_seq_no" : 99779,
+          "follower_global_checkpoint" : 99779,
+          "follower_max_seq_no" : 99779,
+          "outstanding_read_requests" : 1,
+          "total_read_time_millis" : 18848,
+          "operations_read" : 99780,
+          "time_since_last_read_millis" : 3909
+        },
+        {
+          "shard_id" : 2,
+          "leader_global_checkpoint" : 100041,
+          "leader_max_seq_no" : 100041,
+          "follower_global_checkpoint" : 100041,
+          "follower_max_seq_no" : 100041,
+          "outstanding_read_requests" : 1,
+          "total_read_time_millis" : 18821,
+          "operations_read" : 100042,
+          "time_since_last_read_millis" : 3923
+        }
+      ]
+    }
+  ]
+}
+
+
+
+======== B-2：落後量測：follower 讀取速度限制在每次 500 筆、1 個 outstanding read，leader 寫入 20 萬筆 ========  (2026-10-24 22:43:12)
+[esd9] POST /orders-follower/_ccr/pause_follow
+{"acknowledged":true}
+
+[esd9] POST /orders-follower/_ccr/resume_follow
+{"max_read_request_operation_count":500,"max_outstanding_read_requests":1}
+{"acknowledged":true}
+
+# 每 2 秒取樣：ops_behind_stats = _ccr/stats 的 Σ(leader_global_checkpoint - follower_global_checkpoint)；ops_behind = leader 叢集實際 global checkpoint - follower；time_since_last_read 取最大值
+t=1s ops_behind=10000 ops_behind_stats=0 time_since_last_read_ms=174 leader_docs=300000 follower_docs=302176
+t=4s ops_behind=6755 ops_behind_stats=1572 time_since_last_read_ms=135 leader_docs=363336 follower_docs=353782
+t=7s ops_behind=8000 ops_behind_stats=1902 time_since_last_read_ms=138 leader_docs=427398 follower_docs=438341
+t=10s ops_behind=0 ops_behind_stats=0 time_since_last_read_ms=1468 leader_docs=500000 follower_docs=500000
+t=13s ops_behind=0 ops_behind_stats=0 time_since_last_read_ms=4130 leader_docs=500000 follower_docs=500000
+docs=200000 batches=40 failed=0 seconds=7.7 docs/s=25961
+[esd9] GET /orders-follower/_ccr/info?pretty
+{
+  "follower_indices" : [
+    {
+      "follower_index" : "orders-follower",
+      "remote_cluster" : "prod",
+      "leader_index" : "orders",
+      "status" : "active",
+      "parameters" : {
+        "max_read_request_operation_count" : 500,
+        "max_write_request_operation_count" : 5120,
+        "max_outstanding_read_requests" : 1,
+        "max_outstanding_write_requests" : 9,
+        "max_read_request_size" : "32mb",
+        "max_write_request_size" : "9223372036854775807b",
+        "max_write_buffer_count" : 2147483647,
+        "max_write_buffer_size" : "512mb",
+        "max_retry_delay" : "500ms",
+        "read_poll_timeout" : "1m"
+      }
+    }
+  ]
+}
+
+
+[esd9] GET /_ccr/stats?filter_path=auto_follow_stats.number_of_failed_follow_indices,follow_stats.indices.index,follow_stats.indices.shards.shard_id,follow_stats.indices.shards.read_exceptions,follow_stats.indices.shards.fatal_exception&pretty
+{
+  "auto_follow_stats" : {
+    "number_of_failed_follow_indices" : 0
+  },
+  "follow_stats" : {
+    "indices" : [
+      {
+        "index" : "orders-follower",
+        "shards" : [
+          {
+            "shard_id" : 0,
+            "read_exceptions" : [ ]
+          },
+          {
+            "shard_id" : 1,
+            "read_exceptions" : [ ]
+          },
+          {
+            "shard_id" : 2,
+            "read_exceptions" : [ ]
+          }
+        ]
+      }
+    ]
+  }
+}
+
+
+
+======== B-3：leader 叢集斷線（docker network disconnect esd9），恢復後的追趕 ========  (2026-10-24 22:43:25)
+# 主機端：docker network disconnect elasticsearch-lab_labnet c39923ff612801eb116b3d28effb64c4ce79cf13d98e0ace5da856bfd6100d06
+
+docs=50000 batches=10 failed=0 seconds=0.5 docs/s=98307
+（斷線期間 esd9 的 9200 也連不到：network.host 只綁 192.168.60.41；leader 端的文件數）
+[esc1] GET /orders/_count
+{"count":550000,"_shards":{"total":3,"successful":3,"skipped":0,"failed":0}}
+
+# 主機端：docker network connect --ip 192.168.60.41 elasticsearch-lab_labnet c39923ff612801eb116b3d28effb64c4ce79cf13d98e0ace5da856bfd6100d06
+
+t=0s ops_behind=50000 follower_docs=500000
+t=3s ops_behind=50000 follower_docs=500000
+t=5s ops_behind=0 follower_docs=550000
+[esc1] GET /orders/_count
+{"count":550000,"_shards":{"total":3,"successful":3,"skipped":0,"failed":0}}
+
+[esd9] POST /orders-follower/_refresh?filter_path=_shards
+{"_shards":{"total":6,"successful":3,"failed":0}}
+
+[esd9] GET /orders-follower/_count
+{"count":550000,"_shards":{"total":3,"successful":3,"skipped":0,"failed":0}}
+
+[esd9]# grep -iE 'ccr|remote|ShardFollow' /var/log/elasticsearch/es-dr.log | grep -E 'WARN|ERROR' | cut -c1-300 | sed -E 's/^\[[^]]+\]//' | sort | uniq -c | head -8 || echo '(none)'
+      1 [WARN ][o.e.x.c.a.ShardFollowTasksExecutor] [esd9] [orders-follower][2] background management of retention lease [es-dr/orders-follower/iOpcSewwQLqSgxMSyxfgGg-following-prod/orders/POydH4MJQgihwnud2n4GXw] failed while following
+
+[esc1]# rm -rf /mnt/es-snapshots/.dist
+

@@ -135,3 +135,93 @@ F5. 20-cluster.sh test 1: allocation explain now targets an UNASSIGNED orders re
 - test 6 add esc4 (data, ingest): systemctl start 12.6-13.4 s; joined + rebalanced (green, 0 relocating) 14-15 s
   after start; allocation esc1 4 / esc2 4 / esc3 3 / esc4 3 shards; drain via exclude._name: 2 s
 - no OOM / container kills; VM 7.7 GiB with 4 ES nodes at 1g heap each
+
+30-rolling-upgrade.sh (esu1~esu3, 8.19.23 -> 9.5.5; final clean run 22:16-22:31; 2 runs, consistent)
+Fix F6: the downgrade test originally failed for the wrong reason. The cluster-state-encryption step just before
+  it adds cluster.state.encryption.* to the keystore, and 8.19 refuses to start on that first:
+    java.lang.IllegalArgumentException: unknown secure setting [cluster.state.encryption.active_password_id]
+    please check that any required plugins are installed, or check the breaking changes documentation for removed settings
+  The script now removes those two keystore entries before `dnf downgrade`, prints the real exception from
+  es-upgrade.log, and re-adds them after reinstalling 9.5.5. Real downgrade error (identical in a manual test
+  and in the final run):
+    java.lang.IllegalArgumentException: indexCreatedVersionMajor is in the future: 10
+    (Suppressed: CorruptIndexException ... resource=.../var/lib/elasticsearch/_state/segments_4f)
+  i.e. the node metadata (_state) was rewritten with Lucene 10 on the first 9.5.5 start; 8.19 (Lucene 9.12)
+  cannot read it. Going back = restore the before-9.5.5 snapshot on an 8.19 cluster.
+  (Also: run 1's log was rebuilt from the script's stdout after a `git stash -u` unlinked it mid-run; superseded
+  by the final run anyway.)
+- 8.19 cluster bootstrap 14-19 s; 100k docs bulk 3.0-3.2 s; snapshot before-9.5.5 SUCCESS (version 8.19.9-8.19.23, 7 shards)
+- pre-upgrade _migration/deprecations: only node_settings warning
+    "setting [xpack.monitoring.collection.enabled] is deprecated and will be removed after 8.0"; system features
+    all NO_MIGRATION_NEEDED
+- per node (allocation primaries + flush + stop + dnf upgrade + start + rejoin + green), master last:
+    run 2 order esu2, esu3, esu1(master): 178 s, 150 s, 211 s; run 1 order esu1, esu2, esu3(master): 196 s, 139 s, 205 s
+    of which dnf upgrade (662 MB download each) 2m10s-3m14s; systemctl start on 9.5.5 11.2-12.6 s; rejoin <= 1 s;
+    green <= 1 s after re-enabling allocation (no blocked replica allocation was observed in mixed versions —
+    allocation explain was never needed)
+- background writer (1 write / ~0.64 s via docker exec, target switched away from the node being upgraded):
+    run 2: 845 writes, 845 x HTTP 201, 0 errors (514 via esu1, 331 via esu2); run 1: 841 x 201.
+    orders count after = 100000 + 845 = 100845 (no loss)
+- RPM scriptlet in containers: "Failed to restart systemd-sysctl.service: Unit systemd-sysctl.service not found" and
+  "/usr/lib/systemd/systemd-sysctl: No such file or directory" — container artifact, harmless; no .rpmnew/.rpmsave
+  created (our elasticsearch.yml / jvm.options.d were kept)
+- mixed-version WARNs: 9.5.5 nodes repeatedly try to install built-in templates through the 8.19 master:
+    error adding index template [logs-elasticsearch.querylog@mappings] for [stack] ... MapperParsingException:
+    Failed to parse mapping: unknown parameter [preserve_leaf_arrays] on mapper [params] of type [flattened]
+  stops once the master is 9.5.5. Also "ElasticInferenceServiceAuthorizationHandler Failed to revoke access to
+  default inference endpoint IDs ... ClusterBlockException" at startup (harmless).
+- after upgrade: 9.5.5 / Lucene 10.5.1, minimum_wire_compatibility_version 8.19.0, minimum_index_compatibility_version 8.0.0
+  _migration/deprecations (now level critical):
+    node: "Setting [xpack.monitoring.collection.enabled] is deprecated ... will be removed in 10.0"
+    index orders: "Old index with a compatibility version < 9.0" (8.19.9-8.19.22), reindex_required: true
+  data stream rollover: new backing index created 9111000 (9.x), old one stays 8537000; index.mode standard both
+- cluster_state_encryption: 9.5.5 default cluster.state.encryption.required = true (defaults-node-9.5.5.txt).
+  Upgraded nodes have no auto-config, keystore only autoconfiguration.password_hash + keystore.seed.
+  Health report BEFORE adding a password: status GREEN, symptom "Cluster state encryption is not configured.",
+  encryption_required true, state disabled (surprising: required=true but green).
+  After adding cluster.state.encryption.password.v1 + active_password_id=v1 on each node (different random password
+  per node) + POST _nodes/reload_secure_settings (3/3 ok, no restart): GREEN "Cluster state encryption is healthy.",
+  state ready, active_password_id v1, key_count 1.
+
+40-lag.sh (es-prod esc1~esc3 + es-dr esd9 single-node follower, 30-day trial on both; final clean run 22:45; 3 runs)
+Fix F7: the CCR lag metric. `_ccr/stats` leader_global_checkpoint is the leader checkpoint the follower LAST SAW,
+  so Σ(leader_global_checkpoint - follower_global_checkpoint) stays 0 while the follower is cut off. In run 1
+  B-3 the loop therefore ended at t=0 with "ops_behind=0" although follower had 500000 docs vs leader 550000.
+  Now ops_behind = Σ leader primaries' seq_no.global_checkpoint (_cat/shards on esc1) - Σ follower_global_checkpoint
+  (follower sampled first so the value is never negative; run 2 sampled leader first and got -2500..-3121
+  during heavy writes). The stats-based value is still printed as ops_behind_stats for comparison.
+  Also: _refresh on the follower before the final _count (run 2 showed 533364 although it held 550000), and the
+  esd9 WARN grep is case-insensitive and matches ShardFollow (the old 'ccr|remote' pattern matched nothing).
+Network-cut method: `docker network disconnect/connect --ip 192.168.60.41` worked; ES on esd9 kept its binding
+  after reconnect (no pause_follow fallback needed).
+
+A-1 steady state: primary and replica show identical seq_no.max / local_checkpoint / global_checkpoint per shard.
+A-2 replica catch-up (esc3 stopped gracefully -> left immediately; 200k docs written in 2.2 s, ~92k docs/s;
+  health yellow, 4 delayed_unassigned (5m delay)):
+  - esc3 `systemctl start` takes ~13 s; replicas INITIALIZING from t=13-16 s; green 17-18 s after the start
+    command (3 runs: 18, 17, 17 s)
+  - recovery was operations-based thanks to retention leases: files 0 / 0 bytes, translog_ops 66.5k-66.7k per
+    shard, 3.1-3.2 s per shard; afterwards primary == replica for docs, seq_no.max, local/global checkpoint
+B-1 CCR: start_trial ok on both clusters; remote "prod" (sniff, seeds esc1-3:9300) connected immediately;
+  follow orders -> orders-follower: doc counts equal after 5-7 s (incl. initial file copy of 300k docs)
+B-2 lag under load (follower limited to max_read_request_operation_count 500, max_outstanding_read_requests 1;
+  leader bulk 200k docs in 7.4-7.9 s, ~26k docs/s):
+  final run series (t, ops_behind, ops_behind_stats, time_since_last_read_ms, leader_docs, follower_docs):
+    1s 10000 0 174 300000 302176 | 4s 6755 1572 135 363336 353782 | 7s 8000 1902 138 427398 438341 |
+    10s 0 0 1468 500000 500000 | 13s 0 0 4130 500000 500000
+  -> during the bulk the follower trailed by ~7-10k ops (~0.3 s of writes), caught up to 0 within ~2 s of the
+  bulk ending; the throttle (500 ops/read) did not create a visible backlog at this write rate.
+  doc counts are refresh-dependent (follower sometimes shows MORE than leader), so use checkpoints, not _count.
+  time_since_last_read_millis grows when idle (1.4 s -> 4.1 s) — it is not a lag indicator on its own.
+  read_exceptions empty, fatal_exception none.
+B-3 network cut of the follower cluster (esd9 disconnected, leader wrote 50k docs in 0.5 s, 20 s wait):
+  final run: after reconnect ops_behind 50000 at t=0 and t=3 s, 0 at t=5 s (follower 550000 = leader)
+  run 2: 2 of 3 shards caught up by t=5 s, shard 1 stayed at 16636 ops behind for ~200 s and only resumed at
+  t=207 s, together with
+    WARN ShardFollowTasksExecutor [orders-follower][1] background management of retention lease [...] failed while following
+  (an in-flight read on the cut connection hung until it failed, then was retried). Final run logged the same
+  WARN for shard [2] but without a stall. Not reproduced twice -> article can mention "a stuck shard can take
+  minutes to retry after a network cut; watch per-shard checkpoints, not only the total".
+
+Memory: no OOM kills or container restarts in any phase-2 script (max 4 ES nodes x 1g heap in the 7.7 GiB VM).
+Cleanup: docker compose down -v at the end; images eslab-rocky9-{base,es8,es9} kept.
