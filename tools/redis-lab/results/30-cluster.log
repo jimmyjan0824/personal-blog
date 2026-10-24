@@ -1,11 +1,11 @@
 
-======== 環境 ========  (2026-10-24 14:35:31)
+======== 環境 ========  (2026-10-24 14:39:31)
 [rc1]# cat /etc/rocky-release; redis-server --version
 Rocky Linux release 9.3 (Blue Onyx)
 Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=b6219fdaf4deedf5
 
 
-======== 步驟 0~4：OS 參數、使用者與目錄、redis.conf、systemd（六台都做） ========  (2026-10-24 14:35:31)
+======== 步驟 0~4：OS 參數、使用者與目錄、redis.conf、systemd（六台都做） ========  (2026-10-24 14:39:31)
 [rc1]# mkdir -p /etc/sysctl.d && cp /root/conf/99-redis.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-redis.conf >/dev/null && groupadd -r redis && useradd -r -g redis -s /sbin/nologin -d /var/lib/redis redis && mkdir -p /etc/redis /var/lib/redis /var/log/redis && chown -R redis:redis /etc/redis /var/lib/redis /var/log/redis && chmod 750 /etc/redis /var/lib/redis /var/log/redis && install -o redis -g redis -m 640 /root/conf/redis-cluster.conf /etc/redis/redis.conf && sed -i 's/^bind 192.168.58.31 /bind 192.168.58.31 /' /etc/redis/redis.conf && cp /root/conf/redis.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now redis && systemctl is-active redis && grep '^bind' /etc/redis/redis.conf
 Created symlink /etc/systemd/system/multi-user.target.wants/redis.service → /etc/systemd/system/redis.service.
 active
@@ -37,18 +37,17 @@ active
 bind 192.168.58.36 127.0.0.1 -::1
 
 [rc1]# cat /var/log/redis/redis.log
-89:C 24 Oct 2026 06:35:31.553 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
-89:C 24 Oct 2026 06:35:31.554 * Supervised by systemd. Please make sure you set appropriate values for TimeoutStartSec and TimeoutStopSec in your service unit.
-89:C 24 Oct 2026 06:35:31.554 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
-89:C 24 Oct 2026 06:35:31.554 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=89, just started
-89:C 24 Oct 2026 06:35:31.554 * Configuration loaded
-89:M 24 Oct 2026 06:35:31.554 * monotonic clock: POSIX clock_gettime
-89:M 24 Oct 2026 06:35:31.554 * Running mode=cluster, port=6379.
-89:M 24 Oct 2026 06:35:31.554 * No cluster configuration found, I'm 7fcf189682062bef57e7575ffa309d9cfedb81fd
-89:M 24 Oct 2026 06:35:31.556 * Server initialized
-89:M 24 Oct 2026 06:35:31.557 * Creating AOF base file appendonly.aof.1.base.rdb on server start
-89:M 24 Oct 2026 06:35:31.558 * Creating AOF incr file appendonly.aof.1.incr.aof on server start
-89:M 24 Oct 2026 06:35:31.558 * Ready to accept connections tcp
+89:C 24 Oct 2026 06:39:31.815 * Supervised by systemd. Please make sure you set appropriate values for TimeoutStartSec and TimeoutStopSec in your service unit.
+89:C 24 Oct 2026 06:39:31.815 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+89:C 24 Oct 2026 06:39:31.815 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=89, just started
+89:C 24 Oct 2026 06:39:31.815 * Configuration loaded
+89:M 24 Oct 2026 06:39:31.815 * monotonic clock: POSIX clock_gettime
+89:M 24 Oct 2026 06:39:31.815 * Running mode=cluster, port=6379.
+89:M 24 Oct 2026 06:39:31.815 * No cluster configuration found, I'm 979b4d733d04379d642e37ae60f775b0bf48a6d6
+89:M 24 Oct 2026 06:39:31.818 * Server initialized
+89:M 24 Oct 2026 06:39:31.819 * Creating AOF base file appendonly.aof.1.base.rdb on server start
+89:M 24 Oct 2026 06:39:31.820 * Creating AOF incr file appendonly.aof.1.incr.aof on server start
+89:M 24 Oct 2026 06:39:31.820 * Ready to accept connections tcp
 
 [rc1]# redis-cli cluster info | head -7
 cluster_state:fail
@@ -59,13 +58,12 @@ cluster_slots_fail:0
 cluster_known_nodes:1
 cluster_size:0
 
-DIFF databases file=16 actual=1
 save: 3600 1 300 100 60 10000
 client-output-buffer-limit: normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60
 bind: 192.168.58.31 127.0.0.1 -::1
 compare done
 
-======== 步驟 5：建立叢集 ========  (2026-10-24 14:35:32)
+======== 步驟 5：建立叢集 ========  (2026-10-24 14:39:32)
 [rc1]# redis-cli --cluster create 192.168.58.31:6379 192.168.58.32:6379 192.168.58.33:6379 192.168.58.34:6379 192.168.58.35:6379 192.168.58.36:6379 --cluster-replicas 1 --cluster-yes
 >>> Performing hash slots allocation on 6 nodes...
 Master[0] -> Slots 0 - 5460
@@ -74,42 +72,42 @@ Master[2] -> Slots 10923 - 16383
 Adding replica 192.168.58.35:6379 to 192.168.58.31:6379
 Adding replica 192.168.58.36:6379 to 192.168.58.32:6379
 Adding replica 192.168.58.34:6379 to 192.168.58.33:6379
-M: 7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379
+M: 979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379
    slots:[0-5460] (5461 slots) master
-M: 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 192.168.58.32:6379
+M: 0f680b74452965edd64704131b5a58c751c37979 192.168.58.32:6379
    slots:[5461-10922] (5462 slots) master
-M: c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379
+M: 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379
    slots:[10923-16383] (5461 slots) master
-S: 5af3c3a3c4fdff29b314ecfdbda5a664cdea002f 192.168.58.34:6379
-   replicates c85dbb6d7319faa8b614a8da317b18870294b706
-S: c7629aa5208ad2c9888822f2ece422af97487ffe 192.168.58.35:6379
-   replicates 7fcf189682062bef57e7575ffa309d9cfedb81fd
-S: 41117f44f5b22a0f8c346dc1a1b2ff333f42d0a0 192.168.58.36:6379
-   replicates 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e
+S: b3808706dd552952e1dc42e9ee42ab48ac602f8b 192.168.58.34:6379
+   replicates 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf
+S: 958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 192.168.58.35:6379
+   replicates 979b4d733d04379d642e37ae60f775b0bf48a6d6
+S: 71ae48e3a587af3d29044a3f13b4d4b95c8c59a5 192.168.58.36:6379
+   replicates 0f680b74452965edd64704131b5a58c751c37979
 >>> Nodes configuration updated
 >>> Assign a different config epoch to each node
 >>> Sending CLUSTER MEET messages to join the cluster
 Waiting for the cluster to join
 .
 >>> Performing Cluster Check (using node 192.168.58.31:6379)
-M: 7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379
+M: 979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379
    slots:[0-5460] (5461 slots) master
    1 additional replica(s)
-M: c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379
+M: 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379
    slots:[10923-16383] (5461 slots) master
    1 additional replica(s)
-M: 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 192.168.58.32:6379
+M: 0f680b74452965edd64704131b5a58c751c37979 192.168.58.32:6379
    slots:[5461-10922] (5462 slots) master
    1 additional replica(s)
-S: c7629aa5208ad2c9888822f2ece422af97487ffe 192.168.58.35:6379
+S: 71ae48e3a587af3d29044a3f13b4d4b95c8c59a5 192.168.58.36:6379
    slots: (0 slots) slave
-   replicates 7fcf189682062bef57e7575ffa309d9cfedb81fd
-S: 41117f44f5b22a0f8c346dc1a1b2ff333f42d0a0 192.168.58.36:6379
+   replicates 0f680b74452965edd64704131b5a58c751c37979
+S: 958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 192.168.58.35:6379
    slots: (0 slots) slave
-   replicates 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e
-S: 5af3c3a3c4fdff29b314ecfdbda5a664cdea002f 192.168.58.34:6379
+   replicates 979b4d733d04379d642e37ae60f775b0bf48a6d6
+S: b3808706dd552952e1dc42e9ee42ab48ac602f8b 192.168.58.34:6379
    slots: (0 slots) slave
-   replicates c85dbb6d7319faa8b614a8da317b18870294b706
+   replicates 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf
 [OK] All nodes agree about slots configuration.
 >>> Check for open slots...
 >>> Check slots coverage...
@@ -125,54 +123,54 @@ cluster_known_nodes:6
 cluster_size:3
 
 [rc1]# redis-cli cluster nodes | sort -k2
-7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379@16379 myself,master - 0 0 1 connected 0-5460
-13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 192.168.58.32:6379@16379 master - 0 1792823738000 2 connected 5461-10922
-c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379@16379 master - 0 1792823739752 3 connected 10923-16383
-5af3c3a3c4fdff29b314ecfdbda5a664cdea002f 192.168.58.34:6379@16379 slave c85dbb6d7319faa8b614a8da317b18870294b706 0 1792823739000 3 connected
-c7629aa5208ad2c9888822f2ece422af97487ffe 192.168.58.35:6379@16379 slave 7fcf189682062bef57e7575ffa309d9cfedb81fd 0 1792823739537 1 connected
-41117f44f5b22a0f8c346dc1a1b2ff333f42d0a0 192.168.58.36:6379@16379 slave 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 0 1792823739537 2 connected
+979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379@16379 myself,master - 0 0 1 connected 0-5460
+0f680b74452965edd64704131b5a58c751c37979 192.168.58.32:6379@16379 master - 0 1792823979000 2 connected 5461-10922
+270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379@16379 master - 0 1792823978939 3 connected 10923-16383
+b3808706dd552952e1dc42e9ee42ab48ac602f8b 192.168.58.34:6379@16379 slave 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 0 1792823979151 3 connected
+958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 192.168.58.35:6379@16379 slave 979b4d733d04379d642e37ae60f775b0bf48a6d6 0 1792823979571 1 connected
+71ae48e3a587af3d29044a3f13b4d4b95c8c59a5 192.168.58.36:6379@16379 slave 0f680b74452965edd64704131b5a58c751c37979 0 1792823979985 2 connected
 
 [rc1]# redis-cli --cluster check 192.168.58.31:6379
-192.168.58.31:6379 (7fcf1896...) -> 0 keys | 5461 slots | 1 slaves.
-192.168.58.33:6379 (c85dbb6d...) -> 0 keys | 5461 slots | 1 slaves.
-192.168.58.32:6379 (13ab7f35...) -> 0 keys | 5462 slots | 1 slaves.
+192.168.58.31:6379 (979b4d73...) -> 0 keys | 5461 slots | 1 slaves.
+192.168.58.33:6379 (270aa376...) -> 0 keys | 5461 slots | 1 slaves.
+192.168.58.32:6379 (0f680b74...) -> 0 keys | 5462 slots | 1 slaves.
 [OK] 0 keys in 3 masters.
 0.00 keys per slot on average.
 >>> Performing Cluster Check (using node 192.168.58.31:6379)
-M: 7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379
+M: 979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379
    slots:[0-5460] (5461 slots) master
    1 additional replica(s)
-M: c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379
+M: 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379
    slots:[10923-16383] (5461 slots) master
    1 additional replica(s)
-M: 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 192.168.58.32:6379
+M: 0f680b74452965edd64704131b5a58c751c37979 192.168.58.32:6379
    slots:[5461-10922] (5462 slots) master
    1 additional replica(s)
-S: c7629aa5208ad2c9888822f2ece422af97487ffe 192.168.58.35:6379
+S: 71ae48e3a587af3d29044a3f13b4d4b95c8c59a5 192.168.58.36:6379
    slots: (0 slots) slave
-   replicates 7fcf189682062bef57e7575ffa309d9cfedb81fd
-S: 41117f44f5b22a0f8c346dc1a1b2ff333f42d0a0 192.168.58.36:6379
+   replicates 0f680b74452965edd64704131b5a58c751c37979
+S: 958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 192.168.58.35:6379
    slots: (0 slots) slave
-   replicates 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e
-S: 5af3c3a3c4fdff29b314ecfdbda5a664cdea002f 192.168.58.34:6379
+   replicates 979b4d733d04379d642e37ae60f775b0bf48a6d6
+S: b3808706dd552952e1dc42e9ee42ab48ac602f8b 192.168.58.34:6379
    slots: (0 slots) slave
-   replicates c85dbb6d7319faa8b614a8da317b18870294b706
+   replicates 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf
 [OK] All nodes agree about slots configuration.
 >>> Check for open slots...
 >>> Check slots coverage...
 [OK] All 16384 slots covered.
 
 [rc1]# cat /var/lib/redis/nodes-6379.conf
-c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379@16379,,tls-port=0,shard-id=6dec3304da725455c1bfd7fd33d539b449d6fbf2 master - 0 1792823736000 3 connected 10923-16383
-13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 192.168.58.32:6379@16379,,tls-port=0,shard-id=640c7210940fe2f7c816c760d6169abbf2c56790 master - 0 1792823735000 2 connected 5461-10922
-c7629aa5208ad2c9888822f2ece422af97487ffe 192.168.58.35:6379@16379,,tls-port=0,shard-id=e5302b8a853e3225a3021ae24d702e22a59723d1 slave 7fcf189682062bef57e7575ffa309d9cfedb81fd 0 1792823736598 1 connected
-41117f44f5b22a0f8c346dc1a1b2ff333f42d0a0 192.168.58.36:6379@16379,,tls-port=0,shard-id=640c7210940fe2f7c816c760d6169abbf2c56790 slave 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 0 1792823735569 2 connected
-5af3c3a3c4fdff29b314ecfdbda5a664cdea002f 192.168.58.34:6379@16379,,tls-port=0,shard-id=6dec3304da725455c1bfd7fd33d539b449d6fbf2 slave c85dbb6d7319faa8b614a8da317b18870294b706 0 1792823736598 3 connected
-7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379@16379,,tls-port=0,shard-id=e5302b8a853e3225a3021ae24d702e22a59723d1 myself,master - 0 0 1 connected 0-5460
+270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379@16379,,tls-port=0,shard-id=66e494f24599857b06080446f0010a2c45bca04c master - 1792823976558 1792823974000 3 connected 10923-16383
+0f680b74452965edd64704131b5a58c751c37979 192.168.58.32:6379@16379,,tls-port=0,shard-id=b99a660f1fd3dc9552fe32082d54e81834bff54b master - 0 1792823975725 2 connected 5461-10922
+71ae48e3a587af3d29044a3f13b4d4b95c8c59a5 192.168.58.36:6379@16379,,tls-port=0,shard-id=b99a660f1fd3dc9552fe32082d54e81834bff54b slave 0f680b74452965edd64704131b5a58c751c37979 0 1792823975829 2 connected
+979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379@16379,,tls-port=0,shard-id=8be08cf3ec032d9a7000f3078bf076825a1e4d78 myself,master - 0 0 1 connected 0-5460
+958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 192.168.58.35:6379@16379,,tls-port=0,shard-id=8be08cf3ec032d9a7000f3078bf076825a1e4d78 slave 979b4d733d04379d642e37ae60f775b0bf48a6d6 0 1792823975725 1 connected
+b3808706dd552952e1dc42e9ee42ab48ac602f8b 192.168.58.34:6379@16379,,tls-port=0,shard-id=66e494f24599857b06080446f0010a2c45bca04c slave 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 0 1792823976558 3 connected
 vars currentEpoch 6 lastVoteEpoch 0
 
 
-======== 資料寫入：-c 跟隨 MOVED 重導向 ========  (2026-10-24 14:35:40)
+======== 資料寫入：-c 跟隨 MOVED 重導向 ========  (2026-10-24 14:39:40)
 [rc1]# redis-cli -c set user:1001 Jimmy; redis-cli -c get user:1001; redis-cli set user:1001 x; redis-cli cluster keyslot user:1001
 OK
 Jimmy
@@ -197,13 +195,13 @@ CROSSSLOT Keys in request don't hash to the same slot
 
 
 
-======== 測試 1：主庫無回應（docker pause rc1） ========  (2026-10-24 14:35:40)
+======== 測試 1：主庫無回應（docker pause rc1） ========  (2026-10-24 14:39:41)
 [rc1]# redis-cli cluster nodes | grep myself
-7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379@16379 myself,master - 0 0 1 connected 0-5460
+979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379@16379 myself,master - 0 0 1 connected 0-5460
 
-14:35:40 docker compose pause rc1
+14:39:41 docker compose pause rc1
  Container redis-lab-rc1-1 Paused 
-14:35:49 rc5 已升為主庫，經過 9 秒（rc1 狀態：master,fail）
+14:39:49 rc5 已升為主庫，經過 8 秒（rc1 狀態：master,fail）
 [rc2]# redis-cli cluster info | grep -E "cluster_state|cluster_slots_ok|cluster_slots_fail|cluster_known_nodes"
 cluster_state:ok
 cluster_slots_ok:16384
@@ -211,20 +209,19 @@ cluster_slots_fail:0
 cluster_known_nodes:6
 
 [rc2]# redis-cli cluster nodes | sort -k2
-7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379@16379 master,fail - 1792823742083 1792823740035 1 connected
-13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 192.168.58.32:6379@16379 myself,master - 0 0 2 connected 5461-10922
-c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379@16379 master - 0 1792823749249 3 connected 10923-16383
-5af3c3a3c4fdff29b314ecfdbda5a664cdea002f 192.168.58.34:6379@16379 slave c85dbb6d7319faa8b614a8da317b18870294b706 0 1792823748529 3 connected
-c7629aa5208ad2c9888822f2ece422af97487ffe 192.168.58.35:6379@16379 master - 0 1792823748222 7 connected 0-5460
-41117f44f5b22a0f8c346dc1a1b2ff333f42d0a0 192.168.58.36:6379@16379 slave 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e 0 1792823748000 2 connected
+979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379@16379 master,fail - 1792823983709 1792823981138 1 connected
+0f680b74452965edd64704131b5a58c751c37979 192.168.58.32:6379@16379 myself,master - 0 0 2 connected 5461-10922
+270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379@16379 master - 0 1792823989000 3 connected 10923-16383
+b3808706dd552952e1dc42e9ee42ab48ac602f8b 192.168.58.34:6379@16379 slave 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 0 1792823989586 3 connected
+958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 192.168.58.35:6379@16379 master - 0 1792823989000 7 connected 0-5460
+71ae48e3a587af3d29044a3f13b4d4b95c8c59a5 192.168.58.36:6379@16379 slave 0f680b74452965edd64704131b5a58c751c37979 0 1792823989379 2 connected
 
 [rc5]# grep -E "FAIL message|Failover|election|failover|Starting|configEpoch|Setting myself" /var/log/redis/redis.log | tail -10
-82:M 24 Oct 2026 06:35:32.755 * configEpoch set to 5 via CLUSTER SET-CONFIG-EPOCH
-82:S 24 Oct 2026 06:35:47.817 * FAIL message received from 13ab7f35120b6c91d72d8f3d90ca4a0778f9da6e () about 7fcf189682062bef57e7575ffa309d9cfedb81fd ()
-82:S 24 Oct 2026 06:35:47.883 * Start of election delayed for 919 milliseconds (rank #0, offset 36571).
-82:S 24 Oct 2026 06:35:48.812 * Starting a failover election for epoch 7.
-82:S 24 Oct 2026 06:35:48.821 * Failover election won: I'm the new master.
-82:S 24 Oct 2026 06:35:48.821 * configEpoch set to 7 after successful failover
+82:M 24 Oct 2026 06:39:33.053 * configEpoch set to 5 via CLUSTER SET-CONFIG-EPOCH
+82:S 24 Oct 2026 06:39:48.986 * Start of election delayed for 812 milliseconds (rank #0, offset 36571).
+82:S 24 Oct 2026 06:39:49.821 * Starting a failover election for epoch 7.
+82:S 24 Oct 2026 06:39:49.824 * Failover election won: I'm the new master.
+82:S 24 Oct 2026 06:39:49.824 * configEpoch set to 7 after successful failover
 
 [rc2]# redis-cli -c get key:1; redis-cli -c get user:1001; redis-cli -c set after:failover 1
 1
@@ -232,48 +229,48 @@ Jimmy
 OK
 
 
-======== rc1 恢復後自動變成從庫 ========  (2026-10-24 14:35:49)
-14:35:49 docker compose unpause rc1
+======== rc1 恢復後自動變成從庫 ========  (2026-10-24 14:39:50)
+14:39:50 docker compose unpause rc1
  Container redis-lab-rc1-1 Unpaused 
 [rc1]# redis-cli cluster nodes | grep myself; redis-cli info replication | head -6
-7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379@16379 myself,slave c7629aa5208ad2c9888822f2ece422af97487ffe 0 0 7 connected
+979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379@16379 myself,slave 958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 0 0 7 connected
 # Replication
 role:slave
 master_host:192.168.58.35
 master_port:6379
 master_link_status:up
-master_last_io_seconds_ago:6
+master_last_io_seconds_ago:5
 
 [rc1]# grep -E "Configuration change|Clear FAIL|MASTER <-> REPLICA sync|Connecting to MASTER" /var/log/redis/redis.log | tail -5
-89:M 24 Oct 2026 06:35:49.877 * Configuration change detected. Reconfiguring myself as a replica of c7629aa5208ad2c9888822f2ece422af97487ffe ()
-89:S 24 Oct 2026 06:35:49.877 * Connecting to MASTER 192.168.58.35:6379
-89:S 24 Oct 2026 06:35:49.877 * MASTER <-> REPLICA sync started
-89:S 24 Oct 2026 06:35:49.880 * MASTER <-> REPLICA sync: Master accepted a Partial Resynchronization.
+89:M 24 Oct 2026 06:39:50.348 * Configuration change detected. Reconfiguring myself as a replica of 958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 ()
+89:S 24 Oct 2026 06:39:50.348 * Connecting to MASTER 192.168.58.35:6379
+89:S 24 Oct 2026 06:39:50.348 * MASTER <-> REPLICA sync started
+89:S 24 Oct 2026 06:39:50.351 * MASTER <-> REPLICA sync: Master accepted a Partial Resynchronization.
 
 
-======== 測試 2：計畫內切換 CLUSTER FAILOVER（在 rc1 執行，把主庫角色拿回來） ========  (2026-10-24 14:35:58)
+======== 測試 2：計畫內切換 CLUSTER FAILOVER（在 rc1 執行，把主庫角色拿回來） ========  (2026-10-24 14:39:58)
 [rc1]# redis-cli cluster failover; sleep 3; redis-cli cluster nodes | grep myself; redis-cli info replication | head -4
 OK
-7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379@16379 myself,master - 0 0 8 connected 0-5460
+979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379@16379 myself,master - 0 0 8 connected 0-5460
 # Replication
 role:master
 connected_slaves:1
-slave0:ip=192.168.58.35,port=6379,state=online,offset=36663,lag=0
+slave0:ip=192.168.58.35,port=6379,state=online,offset=36649,lag=0
 
 [rc1]# grep -E "Manual failover|failover" /var/log/redis/redis.log | tail -6
-89:S 24 Oct 2026 06:35:58.194 * Manual failover user request accepted.
-89:S 24 Oct 2026 06:35:58.194 * Received replication offset for paused master manual failover: 36649
-89:S 24 Oct 2026 06:35:58.194 * All master replication stream processed, manual failover can start.
-89:S 24 Oct 2026 06:35:58.194 * Starting a failover election for epoch 8.
-89:S 24 Oct 2026 06:35:58.198 * configEpoch set to 8 after successful failover
-89:M 24 Oct 2026 06:36:00.509 * A failover occurred in shard e5302b8a853e3225a3021ae24d702e22a59723d1; node c7629aa5208ad2c9888822f2ece422af97487ffe () lost 0 slot(s) to node 7fcf189682062bef57e7575ffa309d9cfedb81fd () with a config epoch of 8
+89:S 24 Oct 2026 06:39:58.659 * Received replication offset for paused master manual failover: 36649
+89:S 24 Oct 2026 06:39:58.659 * All master replication stream processed, manual failover can start.
+89:S 24 Oct 2026 06:39:58.659 * Starting a failover election for epoch 8.
+89:S 24 Oct 2026 06:39:58.666 * Currently unable to failover: Waiting for votes, but majority still not reached.
+89:S 24 Oct 2026 06:39:58.666 * configEpoch set to 8 after successful failover
+89:M 24 Oct 2026 06:39:58.769 * A failover occurred in shard 8be08cf3ec032d9a7000f3078bf076825a1e4d78; node 958ccf9ac0dbe194b9d5f4ead74aa8ab5d4febf5 () lost 0 slot(s) to node 979b4d733d04379d642e37ae60f775b0bf48a6d6 () with a config epoch of 8
 
 
-======== 測試 3：同一組主從都掛掉 → 叢集失去 slot 覆蓋，cluster-require-full-coverage yes 讓整個叢集停止服務 ========  (2026-10-24 14:36:01)
+======== 測試 3：同一組主從都掛掉 → 叢集失去 slot 覆蓋，cluster-require-full-coverage yes 讓整個叢集停止服務 ========  (2026-10-24 14:40:01)
 rc2 的從庫是 rc6
  Container redis-lab-rc6-1 Paused 
  Container redis-lab-rc2-1 Paused 
-14:36:01 docker compose pause rc2 rc6
+14:40:02 docker compose pause rc2 rc6
 [rc1]# redis-cli cluster info | grep -E "cluster_state|cluster_slots_ok|cluster_slots_fail"; redis-cli -c get key:1; redis-cli -c get key:2
 cluster_state:fail
 cluster_slots_ok:10922
@@ -285,43 +282,43 @@ CLUSTERDOWN The cluster is down
 
  Container redis-lab-rc6-1 Unpaused 
  Container redis-lab-rc2-1 Unpaused 
-14:36:13 docker compose unpause rc2 rc6
+14:40:14 docker compose unpause rc2 rc6
 [rc1]# redis-cli cluster info | grep -E "cluster_state|cluster_slots_ok"; redis-cli -c get key:1
 cluster_state:ok
 cluster_slots_ok:16384
 1
 
 
-======== 最後狀態 ========  (2026-10-24 14:36:24)
+======== 最後狀態 ========  (2026-10-24 14:40:24)
 [rc1]# redis-cli --cluster check 192.168.58.31:6379 | head -12
-192.168.58.31:6379 (7fcf1896...) -> 1009 keys | 5461 slots | 1 slaves.
-192.168.58.33:6379 (c85dbb6d...) -> 1006 keys | 5461 slots | 1 slaves.
-192.168.58.36:6379 (41117f44...) -> 989 keys | 5462 slots | 1 slaves.
+192.168.58.31:6379 (979b4d73...) -> 1009 keys | 5461 slots | 1 slaves.
+192.168.58.33:6379 (270aa376...) -> 1006 keys | 5461 slots | 1 slaves.
+192.168.58.36:6379 (71ae48e3...) -> 989 keys | 5462 slots | 1 slaves.
 [OK] 3004 keys in 3 masters.
 0.18 keys per slot on average.
 >>> Performing Cluster Check (using node 192.168.58.31:6379)
-M: 7fcf189682062bef57e7575ffa309d9cfedb81fd 192.168.58.31:6379
+M: 979b4d733d04379d642e37ae60f775b0bf48a6d6 192.168.58.31:6379
    slots:[0-5460] (5461 slots) master
    1 additional replica(s)
-M: c85dbb6d7319faa8b614a8da317b18870294b706 192.168.58.33:6379
+M: 270aa376e8ebecbe013ced7f8f2e2be5eb81cdaf 192.168.58.33:6379
    slots:[10923-16383] (5461 slots) master
    1 additional replica(s)
 
 [rc1]# grep -E "WARNING" /var/log/redis/redis.log || echo "(no warnings)"
-89:C 24 Oct 2026 06:35:31.553 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+(no warnings)
 
 [rc2]# grep -E "WARNING" /var/log/redis/redis.log || echo "(no warnings)"
-82:C 24 Oct 2026 06:35:31.714 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+(no warnings)
 
 [rc3]# grep -E "WARNING" /var/log/redis/redis.log || echo "(no warnings)"
-82:C 24 Oct 2026 06:35:31.867 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+(no warnings)
 
 [rc4]# grep -E "WARNING" /var/log/redis/redis.log || echo "(no warnings)"
-82:C 24 Oct 2026 06:35:32.018 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+(no warnings)
 
 [rc5]# grep -E "WARNING" /var/log/redis/redis.log || echo "(no warnings)"
-82:C 24 Oct 2026 06:35:32.171 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+(no warnings)
 
 [rc6]# grep -E "WARNING" /var/log/redis/redis.log || echo "(no warnings)"
-82:C 24 Oct 2026 06:35:32.320 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+(no warnings)
 

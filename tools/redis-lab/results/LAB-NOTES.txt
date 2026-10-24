@@ -58,3 +58,24 @@ Not verified
 - THP shows [always] in the container (host VM setting); disable-thp only affects the Redis process, not checked further.
 - sysctl values are applied inside privileged containers to the shared VM kernel, not per host.
 - redis-benchmark numbers are container-internal only.
+
+== Follow-up run (2026-10-24 14:39-14:41 Asia/Taipei) ==
+conf/redis-cluster.conf now has `databases 1`; 40-extra.sh added. No script changes were needed this time.
+
+30-cluster.sh (re-run): PASS
+- No "Changing databases number" WARNING on any of rc1-rc6 ("(no warnings)" x6); cmpconf on rc1: 0 DIFF.
+- docker pause rc1: rc5 promoted, observed after 8 s (pause 06:39:41 UTC; election delayed 812 ms,
+  won 06:39:49.8). rc1 rejoined as replica. CLUSTER FAILOVER on rc1: done within the same second
+  (one "Waiting for votes, but majority still not reached" line, then success 7 ms later).
+- pause rc2 + rc6: cluster_state:fail / CLUSTERDOWN; after unpause ok. rc6 again ended up master of that shard.
+
+40-extra.sh: PASS (all three)
+(a) `port 6390   # 預設` -> "*** FATAL CONFIG FILE ERROR (Redis 7.4.11) *** ... wrong number of arguments", exit=1.
+(b) dump.rdb with 1000 keys started with appendonly yes -> dbsize 0 (log shows only "Creating AOF base/incr
+    file ... on server start", no "DB loaded"). Correct procedure (appendonly no -> CONFIG SET appendonly yes
+    -> restart with appendonly yes) -> dbsize 1000, "DB loaded from base file appendonly.aof.1.base.rdb".
+(c) 8.10.2 core built (rc=0). With --cluster-enabled yes, 8.10.2 logs
+    "WARNING: the cluster bus port is not authenticated: 'tls-cluster' is disabled and protected mode was waived
+    with 'cluster-bus-port-protected-mode no' ..."; 7.4.11 does not. CONFIG GET cluster-bus-port-protected-mode
+    on 8.10.2 = no (default in that test, no config file). Both versions also print the databases 16->1 WARNING
+    because this test starts without a config file (default databases 16).

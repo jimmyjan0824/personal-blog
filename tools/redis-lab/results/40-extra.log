@@ -1,0 +1,56 @@
+
+======== (a) redis.conf 不支援行尾註解 ========  (2026-10-24 14:40:40)
+[rc1]# printf "port 6390                                   # 預設\n" > /tmp/bad.conf; cat /tmp/bad.conf; redis-server /tmp/bad.conf; echo "exit=$?"
+port 6390                                   # 預設
+
+*** FATAL CONFIG FILE ERROR (Redis 7.4.11) ***
+Reading the configuration file, at line 1
+>>> 'port 6390                                   # 預設'
+wrong number of arguments
+exit=1
+
+
+======== (b) 從 RDB 還原：appendonly yes 時 Redis 只讀 AOF ========  (2026-10-24 14:40:40)
+[rc1]# mkdir -p /tmp/src && cd /tmp/src && redis-server --port 6391 --dir /tmp/src --appendonly no --daemonize yes --logfile /tmp/src/log >/dev/null; sleep 1; for i in $(seq 1 1000); do echo "SET k:$i $i"; done | env -u REDISCLI_AUTH redis-cli -p 6391 >/dev/null; env -u REDISCLI_AUTH redis-cli -p 6391 dbsize; env -u REDISCLI_AUTH redis-cli -p 6391 save; env -u REDISCLI_AUTH redis-cli -p 6391 shutdown; ls -l /tmp/src/dump.rdb
+1000
+OK
+-rw-r--r-- 1 root root 9861 Oct 24 06:40 /tmp/src/dump.rdb
+
+--- 錯誤做法：只放 dump.rdb，用 appendonly yes 啟動
+[rc1]# mkdir -p /tmp/bad && cp /tmp/src/dump.rdb /tmp/bad/ && redis-server --port 6392 --dir /tmp/bad --appendonly yes --daemonize yes --logfile /tmp/bad/log >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 6392 dbsize; grep -E "AOF|DB loaded" /tmp/bad/log; env -u REDISCLI_AUTH redis-cli -p 6392 shutdown nosave
+0
+76:M 24 Oct 2026 06:40:41.896 * Creating AOF base file appendonly.aof.1.base.rdb on server start
+76:M 24 Oct 2026 06:40:41.897 * Creating AOF incr file appendonly.aof.1.incr.aof on server start
+
+--- 正確做法：先 appendonly no 載入 RDB，再線上開 AOF
+[rc1]# mkdir -p /tmp/good && cp /tmp/src/dump.rdb /tmp/good/ && redis-server --port 6393 --dir /tmp/good --appendonly no --daemonize yes --logfile /tmp/good/log >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 6393 dbsize; env -u REDISCLI_AUTH redis-cli -p 6393 config set appendonly yes; sleep 2; env -u REDISCLI_AUTH redis-cli -p 6393 info persistence | grep -E "aof_enabled|aof_rewrite_in_progress|aof_last_bgrewrite_status"; ls /tmp/good/appendonlydir; env -u REDISCLI_AUTH redis-cli -p 6393 shutdown
+1000
+OK
+aof_enabled:1
+aof_rewrite_in_progress:0
+aof_last_bgrewrite_status:ok
+appendonly.aof.1.base.rdb
+appendonly.aof.1.incr.aof
+appendonly.aof.manifest
+
+[rc1]# redis-server --port 6393 --dir /tmp/good --appendonly yes --daemonize yes --logfile /tmp/good/log2 >/dev/null; sleep 1; env -u REDISCLI_AUTH redis-cli -p 6393 dbsize; grep -E "DB loaded" /tmp/good/log2; env -u REDISCLI_AUTH redis-cli -p 6393 shutdown nosave
+1000
+117:M 24 Oct 2026 06:40:46.216 * DB loaded from base file appendonly.aof.1.base.rdb: 0.001 seconds
+117:M 24 Oct 2026 06:40:46.216 * DB loaded from append only file: 0.001 seconds
+
+
+======== (c) 8.10.2 Cluster 節點啟動時的 Cluster Bus 警告（對照 7.4.11） ========  (2026-10-24 14:40:47)
+[rc1]# dnf install -y -q gcc make tar gzip >/dev/null 2>&1; cd /usr/local/src && curl -fsSLO https://download.redis.io/releases/redis-8.10.2.tar.gz && tar xzf redis-8.10.2.tar.gz && cd redis-8.10.2 && make -j"$(nproc)" build redis >/tmp/m.log 2>&1; echo rc=$?; src/redis-server --version
+rc=0
+Redis server v=8.10.2 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=ace8b36af594dcd5
+
+[rc1]# mkdir -p /tmp/c8 /tmp/c7; /usr/local/src/redis-8.10.2/src/redis-server --port 7000 --cluster-enabled yes --dir /tmp/c8 --daemonize yes --logfile /tmp/c8/log >/dev/null; redis-server --port 7001 --cluster-enabled yes --dir /tmp/c7 --daemonize yes --logfile /tmp/c7/log >/dev/null; sleep 1; echo "== 8.10.2"; grep -E "WARNING|# " /tmp/c8/log; echo "== 7.4.11"; grep -E "WARNING|# " /tmp/c7/log || echo "(no warnings)"; env -u REDISCLI_AUTH redis-cli -p 7000 config get cluster-bus-port-protected-mode; env -u REDISCLI_AUTH redis-cli -p 7000 shutdown nosave; env -u REDISCLI_AUTH redis-cli -p 7001 shutdown nosave
+== 8.10.2
+6558:C 24 Oct 2026 06:41:39.030 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+6558:C 24 Oct 2026 06:41:39.030 # WARNING: the cluster bus port is not authenticated: 'tls-cluster' is disabled and protected mode was waived with 'cluster-bus-port-protected-mode no'. Any host able to reach the cluster bus port can speak the cluster protocol, so make sure the port is reachable by trusted hosts only.
+6560:M 24 Oct 2026 06:41:39.055 # WARNING: Redis does not require authentication. Redis will accept connections from any local client.
+== 7.4.11
+6561:C 24 Oct 2026 06:41:39.031 # WARNING: Changing databases number from 16 to 1 since we are in cluster mode
+cluster-bus-port-protected-mode
+no
+
