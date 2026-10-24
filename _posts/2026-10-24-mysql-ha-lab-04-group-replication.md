@@ -65,6 +65,8 @@ dnf 安裝的 `/etc/my.cnf` 沒有 `!includedir /etc/my.cnf.d`，**先補上**�
 grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf
 ```
 
+效能與運維的基礎設定（buffer pool、redo log、I/O、連線、慢查詢日誌等）請直接沿用 [GTID 篇步驟 2-2]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 的 `/etc/my.cnf.d/00-server.cnf`，三台都放同一份。實測套用這份設定後，叢集建立與資料同步都正常。下面的 `gr.cnf` 只放本篇需要的設定。
+
 先產生一個 UUID 當群組名稱，三台要一樣：
 
 ```console
