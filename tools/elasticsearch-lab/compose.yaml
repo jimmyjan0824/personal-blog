@@ -16,6 +16,7 @@ x-node: &node
     - "esu1:192.168.60.31"
     - "esu2:192.168.60.32"
     - "esu3:192.168.60.33"
+    - "esd9:192.168.60.41"
 services:
   es1:  { <<: *node, image: eslab-rocky9-base, hostname: es1,  networks: { labnet: { ipv4_address: 192.168.60.11 } } }
   esc1: { <<: *node, hostname: esc1, networks: { labnet: { ipv4_address: 192.168.60.21 } } }
