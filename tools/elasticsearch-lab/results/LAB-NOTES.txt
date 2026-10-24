@@ -1,0 +1,35 @@
+Elasticsearch lab — phase 1 (00-build.sh + 05-defaults.sh), run 2026-10-24 on Docker Desktop
+
+Host
+- macOS 15.7.4 (24G517), Apple M4 (10 cores), 24 GB RAM
+- Docker Desktop 4.96.3, Docker Engine 29.9.2 (client 29.9.2); VM: 10 CPUs, 7.7 GiB RAM
+- docker CLI is not on the default PATH of non-interactive shells; lib.sh already prepends ~/.docker/bin (worked as-is)
+- Base image rockylinux/rockylinux:9 -> Rocky Linux 9.8 (Blue Onyx); arch aarch64
+
+00-build.sh — ran cleanly first time, no changes
+- eslab-rocky9-base: ~33 s (incl. pull); es9 build 3m40s; es8 build 2m43s; whole script ~7 min
+- Elastic GPG key import worked under the RHEL9 default crypto policy (no fix needed)
+- Installed: elasticsearch-9.5.5-1.aarch64 and elasticsearch-8.19.23-1.aarch64, both with bundled OpenJDK 27 (2026-09-15)
+
+05-defaults.sh — needed 2 fixes (both caused by RPM security auto-config running during `docker build`)
+1. TLS hostname: auto-config generates the HTTP cert in the build container, so its SANs are
+   buildkitsandbox / localhost / 127.0.0.1 / ::1 / 172.17.0.2, not esd9/esd8. Every curl failed with
+   "curl: (60) SSL: no alternative certificate subject name matches target host name 'esd9'".
+   Fix (lib.sh): new curl_cmd helper used by e() and eq(): when /etc/elasticsearch/certs/ca.crt exists
+   (our own certs, later phases) it connects to https://<node>:9200 as before; otherwise (auto-config
+   http_ca.crt only) it connects to https://localhost:9200. Printed command lines in logs are unchanged.
+2. Cluster never bootstrapped: auto-config wrote cluster.initial_master_nodes: ["buildkitsandbox"], but
+   node.name defaults to the container hostname, so the node waited for a master forever;
+   elasticsearch-reset-password exited 69 "Failed to determine the health of the cluster".
+   Fix (05-defaults.sh): a logged step before first start replaces "buildkitsandbox" with $(hostname)
+   (on a real host auto-config would have written the host's own name). In addition the reset tool
+   connects to the publish address (container IP, not in SAN), so it now gets --url https://localhost:9200.
+   The original elasticsearch.yml (with buildkitsandbox) is still printed unmodified earlier in the log.
+- After fixes: whole script ~47 s; no curl errors / 4xx in either log
+- systemctl start: 9.5.5 ~8.0 s, 8.19.23 ~10.8 s
+- Auto heap (one node at a time, 7.7 GiB VM): 9.5.5 -Xms/-Xmx 3967m, 8.19.23 3917m; _cat/nodes heap.max 3.8gb, ram.max 7.7gb
+- 8.19.23 ps output also lists -Xms4m/-Xmx64m: the CLI launcher JVM that stays alive as the server's parent
+- Exported defaults: node 9.5.5=1058 / 8.19.23=850 lines; index 224 / 184; threadpool 45 / 41
+- Diff 8.19 -> 9.5: node 247, index 57, threadpool 9 lines (ADD/DEL/CHG)
+
+Cleanup: docker compose down -v (images kept)

@@ -1,0 +1,364 @@
+
+======== esd9：RPM 安裝後的原始設定（auto-config 的結果） ========  (2026-10-24 21:10:54)
+[esd9]# rpm -q elasticsearch; cat /etc/rocky-release; nproc; free -m | head -2
+elasticsearch-9.5.5-1.aarch64
+Rocky Linux release 9.8 (Blue Onyx)
+10
+               total        used        free      shared  buff/cache   available
+Mem:            7934         984        4543           8        2613        6949
+
+[esd9]# grep -Ev "^\s*(#|$)" /etc/elasticsearch/elasticsearch.yml
+path.data: /var/lib/elasticsearch
+path.logs: /var/log/elasticsearch
+xpack.security.enabled: true
+xpack.security.enrollment.enabled: true
+xpack.security.http.ssl:
+  enabled: true
+  keystore.path: certs/http.p12
+xpack.security.transport.ssl:
+  enabled: true
+  verification_mode: certificate
+  keystore.path: certs/transport.p12
+  truststore.path: certs/transport.p12
+cluster.initial_master_nodes: ["buildkitsandbox"]
+http.host: 0.0.0.0
+
+[esd9]# ls -l /etc/elasticsearch /etc/elasticsearch/certs /etc/elasticsearch/jvm.options.d
+/etc/elasticsearch:
+total 56
+drwxr-x--- 2 root elasticsearch  4096 Oct 24 13:00 certs
+-rw-rw---- 1 root elasticsearch  1042 Sep 30 22:16 elasticsearch-plugins.example.yml
+-rw-rw---- 1 root elasticsearch   675 Oct 24 13:00 elasticsearch.keystore
+-rw-rw---- 1 root elasticsearch  4060 Oct 24 13:00 elasticsearch.yml
+-rw-rw---- 1 root elasticsearch  3744 Sep 30 22:16 jvm.options
+drwxr-s--- 2 root elasticsearch  4096 Sep 30 22:51 jvm.options.d
+-rw-rw---- 1 root elasticsearch 22998 Sep 30 22:16 log4j2.properties
+-rw-rw---- 1 root elasticsearch   473 Sep 30 22:16 role_mapping.yml
+-rw-rw---- 1 root elasticsearch   197 Sep 30 22:16 roles.yml
+-rw-rw---- 1 root elasticsearch     0 Sep 30 22:16 users
+-rw-rw---- 1 root elasticsearch     0 Sep 30 22:16 users_roles
+
+/etc/elasticsearch/certs:
+total 24
+-rw-rw---- 1 root elasticsearch 10077 Oct 24 13:00 http.p12
+-rw-rw---- 1 root elasticsearch  1935 Oct 24 13:00 http_ca.crt
+-rw-rw---- 1 root elasticsearch  5838 Oct 24 13:00 transport.p12
+
+/etc/elasticsearch/jvm.options.d:
+total 0
+
+[esd9]# grep -Ev "^\s*(#|$)" /etc/elasticsearch/jvm.options
+-XX:+UseG1GC
+-Djava.io.tmpdir=${ES_TMPDIR}
+20-:--add-modules=jdk.incubator.vector
+23:-XX:CompileCommand=dontinline,java/lang/invoke/MethodHandle.setAsTypeCache
+23:-XX:CompileCommand=dontinline,java/lang/invoke/MethodHandle.asTypeUncached
+-Dorg.apache.lucene.store.defaultReadAdvice=normal
+-Dorg.apache.lucene.store.MMapDirectory.sharedArenaMaxPermits=1
+--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED
+--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:+ExitOnOutOfMemoryError
+-XX:ErrorFile=hs_err_pid%p.log
+-Xlog:gc*,gc+age=trace,safepoint:file=gc.log:utctime,level,pid,tags:filecount=32,filesize=64m
+
+[esd9]# grep -Ev "^\s*(#|$)" /etc/sysconfig/elasticsearch || echo "(全部是註解)"
+ES_PATH_CONF=/etc/elasticsearch
+
+[esd9]# systemctl cat elasticsearch | grep -Ev "^\s*(#|$)"
+[Unit]
+Description=Elasticsearch
+Documentation=https://www.elastic.co
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=notify
+NotifyAccess=all
+RuntimeDirectory=elasticsearch
+PrivateTmp=true
+Environment=ES_HOME=/usr/share/elasticsearch
+Environment=ES_PATH_CONF=/etc/elasticsearch
+Environment=PID_DIR=/run/elasticsearch
+Environment=ES_SD_NOTIFY=true
+EnvironmentFile=-/etc/sysconfig/elasticsearch
+WorkingDirectory=/usr/share/elasticsearch
+User=elasticsearch
+Group=elasticsearch
+ExecStart=/usr/share/elasticsearch/bin/systemd-entrypoint -p ${PID_DIR}/elasticsearch.pid --quiet
+StandardOutput=journal
+StandardError=inherit
+LimitNOFILE=65535
+LimitNPROC=4096
+LimitAS=infinity
+LimitFSIZE=infinity
+TimeoutStopSec=0
+KillSignal=SIGTERM
+KillMode=process
+SendSIGKILL=no
+SuccessExitStatus=143
+TimeoutStartSec=900
+[Install]
+WantedBy=multi-user.target
+
+[esd9]# ls /usr/lib/sysctl.d/; cat /usr/lib/sysctl.d/elasticsearch.conf; sysctl vm.max_map_count vm.swappiness net.ipv4.tcp_retries2
+10-default-yama-scope.conf
+50-redhat.conf
+elasticsearch.conf
+vm.max_map_count=262144
+vm.max_map_count = 262144
+vm.swappiness = 60
+net.ipv4.tcp_retries2 = 15
+
+[esd9]# /usr/share/elasticsearch/bin/elasticsearch-keystore list
+autoconfiguration.password_hash
+cluster.state.encryption.active_password_id
+cluster.state.encryption.password.autoconfigured
+keystore.seed
+xpack.security.http.ssl.keystore.secure_password
+xpack.security.transport.ssl.keystore.secure_password
+xpack.security.transport.ssl.truststore.secure_password
+
+[esd9]# /usr/share/elasticsearch/jdk/bin/java -version
+openjdk version "27" 2026-09-15
+OpenJDK Runtime Environment (build 27+35-2325)
+OpenJDK 64-Bit Server VM (build 27+35-2325, mixed mode, sharing)
+
+[esd9]# grep -Ev "^\s*(#|$)" /etc/elasticsearch/log4j2.properties | grep -E "appender\.(rolling|deprecation_rolling|index_search_slowlog_rolling|index_indexing_slowlog_rolling)\.(fileName|filePattern|policies\.size\.size|strategy\.max)|^logger\.(index_search_slowlog|index_indexing_slowlog)\.level|^rootLogger.level"
+appender.rolling.fileName = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs.cluster_name}_server.json
+appender.rolling.filePattern = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs.cluster_name}-%d{yyyy-MM-dd}-%i.json.gz
+appender.rolling.policies.size.size = 128MB
+rootLogger.level = info
+appender.deprecation_rolling.fileName = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs.cluster_name}_deprecation.json
+appender.deprecation_rolling.filePattern = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs.cluster_name}_deprecation-%i.json.gz
+appender.deprecation_rolling.policies.size.size = 1GB
+appender.deprecation_rolling.strategy.max = 4
+appender.index_search_slowlog_rolling.fileName = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs\
+appender.index_search_slowlog_rolling.filePattern = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs\
+appender.index_search_slowlog_rolling.policies.size.size = 1GB
+appender.index_search_slowlog_rolling.strategy.max = 4
+appender.index_indexing_slowlog_rolling.fileName = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs.cluster_name}\
+appender.index_indexing_slowlog_rolling.filePattern = ${sys:es.logs.base_path}${sys:file.separator}${sys:es.logs.cluster_name}\
+appender.index_indexing_slowlog_rolling.policies.size.size = 1GB
+appender.index_indexing_slowlog_rolling.strategy.max = 4
+logger.index_indexing_slowlog.level = trace
+
+
+======== esd9：第一次啟動（自動 heap） ========  (2026-10-24 21:10:56)
+[esd9]# sed -i "s/\"buildkitsandbox\"/\"$(hostname)\"/" /etc/elasticsearch/elasticsearch.yml; grep initial_master_nodes /etc/elasticsearch/elasticsearch.yml
+#cluster.initial_master_nodes: ["node-1", "node-2"]
+cluster.initial_master_nodes: ["esd9"]
+
+[esd9]# time systemctl start elasticsearch; systemctl is-active elasticsearch
+
+real	0m7.991s
+user	0m0.000s
+sys	0m0.003s
+active
+
+[esd9]# ps -o args= -C java | tr " " "\n" | grep -E "^-X|^-XX|^-Des\.|^-Djava\.io|^-Dlog4j|^-Djdk" | sort
+-Des.distribution.type=rpm
+-Des.java.type=bundled
+-Des.networkaddress.cache.negative.ttl=10
+-Des.networkaddress.cache.ttl=60
+-Des.path.home=/usr/share/elasticsearch
+-Djava.io.tmpdir=/tmp/elasticsearch-10613779066608988305
+-Djdk.attach.allowAttachSelf=true
+-Dlog4j.shutdownHookEnabled=false
+-Dlog4j2.disable.jmx=true
+-Dlog4j2.formatMsgNoLookups=true
+-XX:+AlwaysPreTouch
+-XX:+EnableDynamicAgentLoading
+-XX:+ExitOnOutOfMemoryError
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:+UseG1GC
+-XX:-OmitStackTraceInFastThrow
+-XX:ErrorFile=hs_err_pid%p.log
+-XX:G1HeapRegionSize=4m
+-XX:G1IHOP=30
+-XX:G1ReservePercent=15
+-XX:MaxDirectMemorySize=2079850496
+-XX:ReplayDataFile=/var/log/elasticsearch/replay_pid%p.log
+-Xlog:gc*,gc+age=trace,safepoint:file=gc.log:utctime,level,pid,tags:filecount=32,filesize=64m
+-Xms3967m
+-Xmx3967m
+-Xss1m
+
+[esd9]# cat /proc/$(pgrep -f org.elasticsearch.bootstrap.Elasticsearch | head -1)/limits | grep -E "open files|processes|locked memory|address space"
+Max processes             4096                 4096                 processes 
+Max open files            65535                65535                files     
+Max locked memory         unlimited            unlimited            bytes     
+Max address space         unlimited            unlimited            bytes     
+
+（elastic 密碼重設為隨機值後，再用 API 改成實驗用密碼）
+[esd9] POST /_security/user/elastic/_password
+{"password":"ChangeMe_Elastic_2026"}
+{}
+
+[esd9] GET /
+{
+  "name" : "esd9",
+  "cluster_name" : "elasticsearch",
+  "cluster_uuid" : "0TLQDijnQu6TXjCMwQMF6g",
+  "version" : {
+    "number" : "9.5.5",
+    "build_flavor" : "default",
+    "build_type" : "rpm",
+    "build_hash" : "48acba663b09e70b115dd879329141506c377890",
+    "build_date" : "2026-09-30T22:12:03.984586187Z",
+    "build_snapshot" : false,
+    "lucene_version" : "10.5.1",
+    "minimum_wire_compatibility_version" : "8.19.0",
+    "minimum_index_compatibility_version" : "8.0.0"
+  },
+  "tagline" : "You Know, for Search"
+}
+
+
+[esd9] GET /_cat/nodes?v&h=name,version,node.role,heap.max,ram.max,cpu,master
+name version node.role   heap.max ram.max cpu master
+esd9 9.5.5   cdfhilmrstw    3.8gb   7.7gb  22 *
+
+
+[esd9] GET /_nodes/_local/jvm?filter_path=nodes.*.jvm.mem,nodes.*.jvm.gc_collectors,nodes.*.jvm.using_compressed_ordinary_object_pointers,nodes.*.jvm.version,nodes.*.jvm.vm_name&pretty
+{
+  "nodes" : {
+    "yR2i69XsQLiNTAfsaNoaDQ" : {
+      "jvm" : {
+        "version" : "27",
+        "vm_name" : "OpenJDK 64-Bit Server VM",
+        "mem" : {
+          "heap_init_in_bytes" : 4160749568,
+          "heap_max_in_bytes" : 4160749568,
+          "non_heap_init_in_bytes" : 7667712,
+          "non_heap_max_in_bytes" : 0,
+          "direct_max_in_bytes" : 2079850496
+        },
+        "gc_collectors" : [
+          "G1 Young Generation",
+          "G1 Concurrent GC",
+          "G1 Old Generation"
+        ],
+        "using_compressed_ordinary_object_pointers" : "true"
+      }
+    }
+  }
+}
+
+
+[esd9] GET /_nodes/_local/process,os?filter_path=nodes.*.process,nodes.*.os.available_processors,nodes.*.os.allocated_processors&pretty
+{
+  "nodes" : {
+    "yR2i69XsQLiNTAfsaNoaDQ" : {
+      "os" : {
+        "available_processors" : 10,
+        "allocated_processors" : 10
+      },
+      "process" : {
+        "refresh_interval_in_millis" : 1000,
+        "id" : 222,
+        "mlockall" : false
+      }
+    }
+  }
+}
+
+
+[esd9] GET /_cat/thread_pool?v&h=name,type,size,queue_size,min,max&s=name
+name                                   type    size queue_size  max
+analyze                                fixed      1         16     
+auto_complete                          fixed      2        100     
+azure_event_loop                       scaling              -1    2
+ccr                                    fixed     32        100     
+cluster_coordination                   fixed      1         -1     
+dlm_frozen_transition                  fixed     20        200     
+downsample_indexing                    fixed      1        256     
+esql_external_io                       scaling              -1   30
+esql_worker                            fixed     16       3984     
+fetch_shard_started                    scaling              -1   20
+fetch_shard_store                      scaling              -1   20
+flush                                  scaling              -1    5
+force_merge                            fixed      1         -1     
+generic                                scaling              -1  128
+get                                    fixed     16       1000     
+inference_response                     scaling              -1   10
+inference_utility                      scaling              -1   10
+management                             scaling              -1    5
+merge                                  scaling              -1   10
+ml_datafeed                            scaling              -1  512
+ml_job_comms                           scaling              -1 2048
+ml_native_inference_comms              scaling              -1  330
+ml_utility                             scaling              -1 2048
+model_download                         fixed      5         -1     
+profiling                              scaling              -1    1
+refresh                                scaling              -1    5
+repository_azure                       scaling              -1    5
+rollup_indexing                        fixed      1         -1     
+search                                 fixed     16      16000     
+search_coordination                    fixed      5       1000     
+searchable_snapshots_cache_fetch_async scaling              -1   30
+searchable_snapshots_cache_prewarming  scaling              -1   16
+security-crypto                        fixed      5       1000     
+security-token-key                     fixed      1       1000     
+snapshot                               scaling              -1   10
+snapshot_meta                          scaling              -1   30
+system_critical_read                   fixed      5       2000     
+system_critical_write                  fixed      5       1500     
+system_read                            fixed      5       2000     
+system_write                           fixed      5       1000     
+system_write_coordination              fixed      5       1000     
+warmer                                 scaling              -1    5
+watcher                                fixed     50       1000     
+write                                  fixed     10      10000     
+write_coordination                     fixed     10      10000     
+
+
+[esd9] GET /_nodes/_local/settings?flat_settings&filter_path=nodes.*.settings&pretty
+{
+  "nodes" : {
+    "yR2i69XsQLiNTAfsaNoaDQ" : {
+      "settings" : {
+        "cluster.election.strategy" : "supports_voting_only",
+        "cluster.initial_master_nodes" : [
+          "esd9"
+        ],
+        "cluster.name" : "elasticsearch",
+        "http.compression" : "false",
+        "http.host" : "0.0.0.0",
+        "http.type" : "security4",
+        "http.type.default" : "netty4",
+        "node.attr.ml.allocated_processors" : "10",
+        "node.attr.ml.allocated_processors_double" : "10.0",
+        "node.attr.ml.config_version" : "12.0.0",
+        "node.attr.ml.machine_memory" : "8319504384",
+        "node.attr.ml.max_jvm_size" : "4160749568",
+        "node.attr.transform.config_version" : "10.0.0",
+        "node.attr.xpack.installed" : "true",
+        "node.name" : "esd9",
+        "path.data" : "/var/lib/elasticsearch",
+        "path.home" : "/usr/share/elasticsearch",
+        "path.logs" : "/var/log/elasticsearch",
+        "transport.type" : "security4",
+        "transport.type.default" : "netty4",
+        "xpack.security.enabled" : "true",
+        "xpack.security.enrollment.enabled" : "true",
+        "xpack.security.http.ssl.enabled" : "true",
+        "xpack.security.transport.ssl.enabled" : "true"
+      }
+    }
+  }
+}
+
+
+[esd9] GET /_index_template?filter_path=index_templates.name
+{"index_templates":[{"name":".kibana-reporting"},{"name":".monitoring-ent-search-mb"},{"name":"logs-apm.error@template"},{"name":"metrics-apm.service_destination.1m@template"},{"name":"metrics-apm.service_summary.60m@template"},{"name":"metrics-apm.service_summary.1m@template"},{"name":"ilm-history-7"},{"name":"metrics-service_transaction.10m.otel@template"},{"name":".fleet-fileds-tohost-meta"},{"name":"metrics-prometheus@template"},{"name":"metrics-apm.transaction.1m@template"},{"name":".fleet-fileds-fromhost-data"},{"name":"traces-otel@template"},{"name":"metrics-transaction.10m.otel@template"},{"name":"metrics-apm.service_transaction.60m@template"},{"name":"logs-otel@template"},{"name":"metrics-apm.transaction.60m@template"},{"name":"logs-elasticsearch.querylog@template"},{"name":"logs"},{"name":".monitoring-beats-mb"},{"name":"metrics-apm.transaction.10m@template"},{"name":".monitoring-kibana-mb"},{"name":"metrics-service_summary.60m.otel@template"},{"name":"metrics-apm.service_summary.10m@template"},{"name":".watch-history-18"},{"name":".ml-state"},{"name":".deprecation-indexing-template-9"},{"name":".monitoring-logstash-mb"},{"name":"agentless"},{"name":".ml-anomalies-"},{"name":"metrics"},{"name":".ml-notifications-000002"},{"name":"metrics-apm.service_destination.10m@template"},{"name":".ml-stats"},{"name":".slm-history-7"},{"name":"behavioral_analytics-events-default"},{"name":"metrics-otel@template"},{"name":"metrics-service_destination.10m.otel@template"},{"name":".fleet-fileds-fromhost-meta"},{"name":"metrics-service_destination.1m.otel@template"},{"name":"elastic-connectors"},{"name":"metrics-apm.service_destination.60m@template"},{"name":"elastic-connectors-sync-jobs"},{"name":".monitoring-es-mb"},{"name":"metrics-service_summary.1m.otel@template"},{"name":"metrics-apm.service_transaction.10m@template"},{"name":"metrics-service_transaction.60m.otel@template"},{"name":"traces-apm@template"},{"name":"logs-apm.app@template"},{"name":"metrics-apm.service_transaction.1m@template"},{"name":"synthetics"},{"name":"metrics-apm.internal@template"},{"name":"metrics-service_destination.60m.otel@template"},{"name":"metrics-service_summary.10m.otel@template"},{"name":".fleet-fileds-tohost-data"},{"name":"metrics-transaction.1m.otel@template"},{"name":"metrics-transaction.60m.otel@template"},{"name":"metrics-service_transaction.1m.otel@template"},{"name":"traces-apm.rum@template"},{"name":"search-acl-filter"},{"name":".deprecation-indexing-template"},{"name":"metrics-apm.app@template"},{"name":"traces-apm.sampled@template"}]}
+
+[esd9] GET /_cat/indices?v&expand_wildcards=all&s=index
+health status index       uuid                   pri rep docs.count docs.deleted store.size pri.store.size dataset.size
+green  open   .security-7 LMmYf5NnQvmWnXu3Er7riw   1   0         30            1     53.6kb         53.6kb       53.6kb
+
+
+[esd9] PUT /defaults-check
+{"settings":{}}
+{"acknowledged":true,"shards_acknowledged":true,"index":"defaults-check"}
+
+esd9：node     1058 筆、index      224 筆

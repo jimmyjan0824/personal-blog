@@ -8,6 +8,12 @@ cd "$(dirname "$0")"
 export PATH="$HOME/.docker/bin:$PATH"
 mkdir -p results
 ES_PW=${ES_PW:-ChangeMe_Elastic_2026}
+# 容器內 curl 指令。RPM 的 auto-config 在 docker build 時就產生憑證（SAN 是 buildkitsandbox / localhost / 127.0.0.1），
+# 所以只有 auto-config 的 http_ca.crt 時改連 localhost；用自己簽的 ca.crt 時照節點名稱連
+curl_cmd() {
+  local n=$1 m=$2 path=$3
+  echo "C=/etc/elasticsearch/certs; if [ -f \$C/ca.crt ]; then CA=\$C/ca.crt H=$n; else CA=\$C/http_ca.crt H=localhost; fi; curl -sS --cacert \$CA -u 'elastic:$ES_PW' -X $m \"https://\$H:9200$path\""
+}
 x() {
   local n=$1; shift
   echo "[$n]# $*"
@@ -19,7 +25,7 @@ e() {
   echo "[$n] $m $path"
   case "$body" in @*) echo "（body：${body:1}）";; ?*) echo "$body";; esac
   case "$body" in *.yaml) ct=application/yaml;; *.ndjson) ct=application/x-ndjson;; esac
-  local CURL="curl -sS --cacert \$(ls /etc/elasticsearch/certs/ca.crt /etc/elasticsearch/certs/http_ca.crt 2>/dev/null | head -1) -u 'elastic:$ES_PW' -X $m 'https://$n:9200$path'"
+  local CURL="$(curl_cmd "$n" "$m" "$path")"
   case "$body" in
     @*) docker compose exec -T "$n" bash -c "$CURL -H 'Content-Type: $ct' --data-binary '$body'" 2>&1;;
     ?*) printf '%s' "$body" | docker compose exec -T "$n" bash -c "$CURL -H 'Content-Type: $ct' --data-binary @-" 2>&1;;
@@ -30,7 +36,7 @@ e() {
 # 不印指令、只取結果（給腳本判斷用）
 eq() {
   local n=$1 m=$2 path=$3
-  docker compose exec -T "$n" bash -c "curl -sS --cacert \$(ls /etc/elasticsearch/certs/ca.crt /etc/elasticsearch/certs/http_ca.crt 2>/dev/null | head -1) -u 'elastic:$ES_PW' -X $m 'https://$n:9200$path'" 2>/dev/null
+  docker compose exec -T "$n" bash -c "$(curl_cmd "$n" "$m" "$path")" 2>/dev/null
 }
 note() { echo; echo "======== $* ========  ($(date '+%F %T'))"; }
 # 主機端指令：印成「# 主機端：指令」再執行

@@ -1,0 +1,9 @@
+ADD dlm_frozen_transition|{"type":"fixed","size":20,"keep_alive":"10m","queue_size":200}
+ADD esql_external_io|{"type":"scaling","core":0,"max":30,"keep_alive":"30s","queue_size":-1}
+ADD inference_response|{"type":"scaling","core":0,"max":10,"keep_alive":"10m","queue_size":-1}
+ADD system_write_coordination|{"type":"fixed","size":5,"queue_size":1000}
+ADD write_coordination|{"type":"fixed","size":10,"queue_size":10000}
+CHG azure_event_loop|{"type":"scaling","core":0,"max":1,"keep_alive":"30s","queue_size":-1}|{"type":"scaling","core":0,"max":2,"keep_alive":"30s","queue_size":-1}
+CHG esql_worker|{"type":"fixed","size":16,"queue_size":1000}|{"type":"fixed","size":16,"queue_size":3984}
+CHG search|{"type":"fixed","size":16,"queue_size":1000}|{"type":"fixed","size":16,"queue_size":16000}
+DEL search_throttled|{"type":"fixed","size":1,"queue_size":100}

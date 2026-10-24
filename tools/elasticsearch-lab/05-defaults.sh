@@ -18,10 +18,13 @@ x $d '/usr/share/elasticsearch/bin/elasticsearch-keystore list'
 x $d '/usr/share/elasticsearch/jdk/bin/java -version'
 x $d 'grep -Ev "^\s*(#|$)" /etc/elasticsearch/log4j2.properties | grep -E "appender\.(rolling|deprecation_rolling|index_search_slowlog_rolling|index_indexing_slowlog_rolling)\.(fileName|filePattern|policies\.size\.size|strategy\.max)|^logger\.(index_search_slowlog|index_indexing_slowlog)\.level|^rootLogger.level"'
 note "$d：第一次啟動（自動 heap）"
+# auto-config 在 docker build 時執行，initial_master_nodes 寫的是建置容器的 hostname（buildkitsandbox），
+# 實機上會是本機 hostname；換成容器的 hostname，否則節點無法 bootstrap 叢集
+x $d 'sed -i "s/\"buildkitsandbox\"/\"$(hostname)\"/" /etc/elasticsearch/elasticsearch.yml; grep initial_master_nodes /etc/elasticsearch/elasticsearch.yml'
 x $d 'time systemctl start elasticsearch; systemctl is-active elasticsearch'
 x $d 'ps -o args= -C java | tr " " "\n" | grep -E "^-X|^-XX|^-Des\.|^-Djava\.io|^-Dlog4j|^-Djdk" | sort'
 x $d 'cat /proc/$(pgrep -f org.elasticsearch.bootstrap.Elasticsearch | head -1)/limits | grep -E "open files|processes|locked memory|address space"'
-PW=$(docker compose exec -T $d /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s 2>/dev/null | tail -1 | tr -d '\r')
+PW=$(docker compose exec -T $d /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s --url https://localhost:9200 2>/dev/null | tail -1 | tr -d '\r')
 echo "（elastic 密碼重設為隨機值後，再用 API 改成實驗用密碼）"
 ES_PW=$PW e $d POST /_security/user/elastic/_password '{"password":"ChangeMe_Elastic_2026"}'
 e $d GET /

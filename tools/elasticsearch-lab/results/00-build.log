@@ -1,0 +1,107 @@
+
+======== docker build eslab-rocky9-base ========  (2026-10-24 20:56:57)
+docker.io/rockylinux/rockylinux:9
+#6 exporting manifest list sha256:9150035f13ad6b01c0f43e5cf5c42ef5c409e8c73be1b5e8355758bd35196cbd done
+#6 naming to docker.io/library/eslab-rocky9-base:latest done
+#6 unpacking to docker.io/library/eslab-rocky9-base:latest
+#6 unpacking to docker.io/library/eslab-rocky9-base:latest 0.4s done
+#6 DONE 1.6s
+Rocky Linux release 9.8 (Blue Onyx)
+
+======== docker build eslab-rocky9-es9（Elasticsearch 9.5.5） ========  (2026-10-24 20:57:30)
+#5 200.2 after creating an enrollment token on your existing cluster.
+#5 200.2 
+#5 200.2 You can complete the following actions at any time:
+#5 200.2 
+#5 200.2 Reset the password of the elastic built-in superuser with 
+#5 200.2 '/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic'.
+#5 200.2 
+#5 200.2 Generate an enrollment token for Kibana instances with 
+#5 200.2  '/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana'.
+#5 200.2 
+#5 200.2 Generate an enrollment token for Elasticsearch nodes with 
+#5 200.2 '/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s node'.
+#5 200.2 
+#5 200.2 -------------------------------------------------------------------------------------------------
+#5 200.2 ### NOT starting on installation, please execute the following statements to configure elasticsearch service to start automatically using systemd
+#5 200.2  sudo systemctl daemon-reload
+#5 200.2  sudo systemctl enable elasticsearch.service
+#5 200.2 ### You can start elasticsearch service by executing
+#5 200.2  sudo systemctl start elasticsearch.service
+#5 200.2 
+#5 201.1   Verifying        : elasticsearch-9.5.5-1.aarch64                          1/1 
+#5 201.1 
+#5 201.1 Installed:
+#5 201.1   elasticsearch-9.5.5-1.aarch64                                                 
+#5 201.1 
+#5 201.1 Complete!
+#5 201.3 30 files removed
+#5 DONE 201.3s
+
+#6 exporting to image
+#6 exporting layers
+#6 exporting layers 16.1s done
+#6 exporting manifest sha256:3f77ae236fd2613cac75ce5f300628d1083465dcd6a94581d414e91a41d9fe41 done
+#6 exporting config sha256:52facaa846d33ffb570d4b069a156d4afd4a25b70f99bd3cbe739fe170730e9d done
+#6 exporting attestation manifest sha256:2048eb9257e6b62cb00e42b978e0b56b9a75018d1a61fffd8abb40e00fc54868 done
+#6 exporting manifest list sha256:e1bcfd2f98fce7066ea7e7874c4e48b9297960f718854ab96052155a94019590 done
+#6 naming to docker.io/library/eslab-rocky9-es9:latest done
+#6 unpacking to docker.io/library/eslab-rocky9-es9:latest
+#6 unpacking to docker.io/library/eslab-rocky9-es9:latest 3.0s done
+#6 DONE 19.1s
+
+real	3m40.678s
+user	0m0.241s
+sys	0m0.197s
+
+======== docker build eslab-rocky9-es8（Elasticsearch 8.19.23） ========  (2026-10-24 21:01:11)
+#5 146.2 after creating an enrollment token on your existing cluster.
+#5 146.2 
+#5 146.2 You can complete the following actions at any time:
+#5 146.2 
+#5 146.2 Reset the password of the elastic built-in superuser with 
+#5 146.2 '/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic'.
+#5 146.2 
+#5 146.2 Generate an enrollment token for Kibana instances with 
+#5 146.2  '/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana'.
+#5 146.2 
+#5 146.2 Generate an enrollment token for Elasticsearch nodes with 
+#5 146.2 '/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s node'.
+#5 146.2 
+#5 146.2 -------------------------------------------------------------------------------------------------
+#5 146.2 ### NOT starting on installation, please execute the following statements to configure elasticsearch service to start automatically using systemd
+#5 146.2  sudo systemctl daemon-reload
+#5 146.2  sudo systemctl enable elasticsearch.service
+#5 146.2 ### You can start elasticsearch service by executing
+#5 146.2  sudo systemctl start elasticsearch.service
+#5 146.2 
+#5 147.0   Verifying        : elasticsearch-8.19.23-1.aarch64                        1/1 
+#5 147.0 
+#5 147.0 Installed:
+#5 147.0   elasticsearch-8.19.23-1.aarch64                                               
+#5 147.0 
+#5 147.0 Complete!
+#5 147.2 30 files removed
+#5 DONE 147.2s
+
+#6 exporting to image
+#6 exporting layers
+#6 exporting layers 13.2s done
+#6 exporting manifest sha256:6503f3f2b1ab8141a2f0f5aa97499898c57a6e2f300328dab52f5be18848b388 done
+#6 exporting config sha256:1826c2a45e0dce5601a74111631873e3f796c4b9998c9bbb5928962ed212fe3c done
+#6 exporting attestation manifest sha256:cd966ac1a6ba7d93dbe0d9a9ddcc89af955f8476774b69411647d01acf800278 done
+#6 exporting manifest list sha256:e90c7bffbec79aefd7a6ffe04053027b97fb87e6a5440b9f667360d8c3206cc1 done
+#6 naming to docker.io/library/eslab-rocky9-es8:latest done
+#6 unpacking to docker.io/library/eslab-rocky9-es8:latest
+#6 unpacking to docker.io/library/eslab-rocky9-es8:latest 2.5s done
+#6 DONE 15.8s
+
+real	2m43.204s
+user	0m0.196s
+sys	0m0.150s
+elasticsearch-9.5.5-1.aarch64
+Version: 9.5.5, Build: rpm/48acba663b09e70b115dd879329141506c377890/2026-09-30T22:12:03.984586187Z, JVM: 27
+openjdk version "27" 2026-09-15
+elasticsearch-8.19.23-1.aarch64
+Version: 8.19.23, Build: rpm/6940e499f8a38841809b8e295a20c6421c95d9e4/2026-09-30T23:11:55.493565832Z, JVM: 27
+openjdk version "27" 2026-09-15
