@@ -51,9 +51,6 @@ sudo firewall-cmd --reload
 
 ## 步驟 1：安裝套件
 
-> 這一步**未實測**，測試環境連不到 `repo.percona.com`。`db1`~`db3` 使用 Percona 官方映像裡已安裝的同版本 RPM；`router` 則是把 Percona 官方 Router 映像中 `percona-mysql-router-8.0.46-37.1.el9` 套件的檔案放進節點，並建立該 RPM 會建立的 `mysqlrouter` 系統帳號，之後的 `systemctl` 操作都是真的執行。
-{: .prompt-warning }
-
 ```bash
 # db1~db3
 sudo dnf install -y https://repo.percona.com/yum/percona-release-latest.noarch.rpm
@@ -66,7 +63,19 @@ sudo percona-release setup ps80
 sudo dnf install -y percona-mysql-router percona-server-client
 ```
 
-確認版本（實測輸出）：
+實測安裝的套件（Rocky 9 容器，aarch64）：
+
+```console
+Installing:
+ percona-mysql-router      aarch64  8.0.46-37.1.el9          ps-80-release-aarch64      3.8 M
+ percona-mysql-shell       aarch64  8.0.46-1.el9             ps-80-release-aarch64      103 M
+ percona-server-client     aarch64  8.0.46-37.1.el9          ps-80-release-aarch64      3.2 M
+ percona-server-server     aarch64  8.0.46-37.1.el9          ps-80-release-aarch64       58 M
+...
+Complete!
+```
+
+`percona-mysql-router` 的 RPM 會建立 `mysqlrouter` 系統帳號與 `mysqlrouter.service`。確認版本：
 
 ```console
 db1# mysqlsh --version
@@ -75,10 +84,19 @@ router# mysqlrouter --version
 MySQL Router  Ver 8.0.46-37 for Linux on x86_64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
 ```
 
+> 容器版 Rocky 9 沒有安裝語系包，`mysqlsh` 每次執行都會印 `Cannot set LC_ALL to locale en_US.UTF-8`，不影響功能；想消掉可以 `dnf install -y glibc-langpack-en`。
+{: .prompt-info }
+
 > MySQL Shell 與 Router 的版本要**大於等於** MySQL Server 的版本。
 {: .prompt-info }
 
 ## 步驟 2：最小設定檔（db1~db3）
+
+dnf 安裝的 `/etc/my.cnf` 沒有 `!includedir /etc/my.cnf.d`，**先補上**，否則下面的 `ic.cnf` 不會被讀到，三台的 `server_id` 會一樣都是 1（原因與實測錯誤見 [GTID 篇步驟 2-1]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %})）：
+
+```bash
+grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf
+```
 
 GTID、binlog 這些設定交給 `dba.configureInstance()` 處理，設定檔只放每台不同的東西：
 
@@ -160,7 +178,9 @@ db3	ON	ON	3
 
 （`SELECT @@hostname, @@gtid_mode, @@enforce_gtid_consistency, @@server_id`）
 
-> 在腳本或 `-e` 裡執行 `mysqlsh` 時，請加 `--no-wizard`。實測沒加的時候，`configureInstance` 在沒有終端機的環境下會停在互動確認，CPU 吃滿且永遠不會結束。在終端機裡手動執行則會正常詢問。
+> 在腳本或 `-e` 裡執行 `mysqlsh` 時，請加 `--no-wizard`。兩個環境都實測過：沒加的時候，`configureInstance` 在沒有終端機的環境下會停在「需要修正的設定」表格後的互動確認，CPU 吃滿且不會結束（中斷後沒有改到任何設定，`gtid_mode` 仍是 `OFF`）。在終端機裡手動執行則會正常詢問。
+>
+> 加了 `--no-wizard` 之後，**`-p` 後面一定要接密碼**（例如 `-p'Root#Pass2026'`）。只寫 `-p` 的話它不會詢問密碼，結果是 `Access denied for user 'root'@'localhost' (using password: NO)`。
 {: .prompt-danger }
 
 ## 步驟 4：建立叢集（在 db1）
@@ -421,7 +441,19 @@ router# for p in 6446 6447 6447 6447; do mysql -h127.0.0.1 -P$p -uapp -p'App#Pas
 ...
 ```
 
-`systemctl stop mysqld` 本身花了幾秒做正常關機，關機完成後第一次寫入就已經被 Router 導到新的 Primary `db2`，**應用程式的連線設定完全不用改**。Router 日誌：
+`systemctl stop mysqld` 本身花了幾秒做正常關機，關機完成後寫入就被 Router 導到新的 Primary `db2`，**應用程式的連線設定完全不用改**。
+
+在另一個環境重跑時，剛好有一次寫入落在切換的那一秒，連線被中斷，下一秒就正常：
+
+```console
+04:33:57 6446 -> db1
+04:34:00 6446 -> ERROR 2013 (HY000): Lost connection to MySQL server at 'reading initial communication packet', system error: 0
+04:34:01 6446 -> db2
+04:34:02 6446 -> db2
+```
+
+> Router 能自動導向新的 Primary，但**切換當下的連線與進行中的交易會失敗**。應用程式要能處理 `2013`、`2006` 這類斷線錯誤並重試（重新連線、重做整筆交易），否則使用者還是會看到錯誤。
+{: .prompt-warning }Router 日誌：
 
 ```console
 router# grep metadata_cache /var/log/mysqlrouter/mysqlrouter.log | tail -6
@@ -490,7 +522,9 @@ db1# mysql -e "SELECT MEMBER_HOST, MEMBER_STATE, MEMBER_ROLE FROM performance_sc
 +-------------+--------------+-------------+
 ```
 
-用 `rebootClusterFromCompleteOutage()`，它會比對各節點的 GTID，選出資料最完整的節點重新 bootstrap，再把其他節點加回來：
+用 `rebootClusterFromCompleteOutage()`，它會比對各節點的 GTID，選出資料最完整的節點當作 seed 重新 bootstrap，再把其他節點加回來。
+
+以下是依 db3 → db2 → db1 的順序停機（db1 最後停、資料最新）的結果：
 
 ```javascript
 var cluster = dba.rebootClusterFromCompleteOutage('myCluster')
@@ -510,8 +544,6 @@ The instance 'db2:3306' was successfully rejoined to the cluster.
 The instance 'db3:3306' was successfully rejoined to the cluster.
 
 The Cluster was successfully rebooted.
-
-Cluster is ONLINE and can tolerate up to ONE failure.
 ```
 
 ```console
@@ -523,6 +555,28 @@ Cluster is ONLINE and can tolerate up to ONE failure.
 | db3         | ONLINE       | SECONDARY   |
 +-------------+--------------+-------------+
 ```
+
+`cluster.status()` 的 `statusText` 回到 `Cluster is ONLINE and can tolerate up to ONE failure.`。
+
+**新的 Primary 不一定是原本那台。** 在另一個環境改成 db1 → db2 → db3 的順序停機，db3 最後停、GTID 最多，Shell 就自動改用 db3 當 seed：
+
+```console
+Cluster instances: 'db1:3306' (OFFLINE), 'db2:3306' (OFFLINE), 'db3:3306' (OFFLINE)
+Waiting for instances to apply pending received transactions...
+Switching over to instance 'db3:3306' (which has the highest GTID set), to be used as seed.
+...
+The Cluster was successfully rebooted.
+
++-------------+--------------+-------------+
+| MEMBER_HOST | MEMBER_STATE | MEMBER_ROLE |
++-------------+--------------+-------------+
+| db1         | ONLINE       | SECONDARY   |
+| db2         | ONLINE       | SECONDARY   |
+| db3         | ONLINE       | PRIMARY     |
++-------------+--------------+-------------+
+```
+
+這是正確行為，可以避免遺失最後的交易。Router 也會跟著把 6446 導到 db3（實測 `6446 db3 0`）。若希望主庫回到 db1，再執行一次 `cluster.setPrimaryInstance('db1:3306')`。
 
 ## 常用 AdminAPI 指令
 
@@ -544,13 +598,39 @@ Cluster is ONLINE and can tolerate up to ONE failure.
 | `User 'root' can only connect from 'localhost'` | 叢集管理需要可遠端登入的帳號 | `configureInstance` 時用 `clusterAdmin` 建立 |
 | `mysqlsh -e` 卡住不結束、CPU 100% | 非終端機環境下停在互動確認 | 加 `--no-wizard` |
 | Router 的 `/tmp/mysql.sock` 連不到 | systemd 的 `PrivateTmp=true` | 不用 `--conf-use-sockets`，走 TCP |
+| `ic.cnf` 沒生效、三台 `server_id` 都是 1 | dnf 版 `/etc/my.cnf` 沒有 `!includedir` | 第一次啟動前補上 |
+| `--no-wizard` 加 `-p` 變成 `using password: NO` | `--no-wizard` 不會詢問密碼 | `-p'密碼'` 或 `--password='密碼'` |
+| 切換瞬間 `ERROR 2013 Lost connection` | 舊 Primary 關機時連線被切斷 | 應用程式要重試 |
+| 全停重啟後 Primary 變成 db3 | seed 選 GTID 最多的節點 | 正常行為，需要時用 `setPrimaryInstance()` 換回 |
+
+## 驗證方式與結果
+
+驗證環境與 [GTID 篇的「驗證方式與結果」]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 相同（環境 A：Rocky 9 容器 + dnf 安裝 server / shell / router，Mac M4；環境 B：Percona 官方映像，Linux x86_64，router 節點放入同版本 `percona-mysql-router` RPM 的檔案）。四台都以 systemd 為 PID 1，`mysqld`、`mysqlrouter` 都用 `systemctl` 管理。每次從全新的主機開始。
+
+| 步驟 | 怎麼驗證 | 判定通過的條件 | 環境 A | 環境 B |
+| :--- | :--- | :--- | :--- | :--- |
+| 3 | `configureInstance` 後查詢 `@@gtid_mode` 等 | 三台 `ON ON`、`server_id` 各不相同 | ✅ | ✅ |
+| 4~6 | `createCluster`、`addInstance`、`cluster.status()` | Clone 完成（約 77 MB / 1 秒）、`status: OK` | ✅ | ✅ |
+| 7 | `mysqlrouter --bootstrap`、`systemctl status mysqlrouter` | 產生設定檔、服務 `active (running)` | ✅ | ✅ |
+| 8 | 分別連 6446、6447 查 `@@hostname` | 6446 到 Primary；6447 在 Secondary 間輪流 | ✅ | ✅ |
+| 9 | 停掉 Primary，同時每秒經 6446 寫入 | 寫入自動改到新 Primary | ✅ 有一次 `ERROR 2013` | ✅ |
+| 10 | 舊 Primary 重新啟動、`setPrimaryInstance()` | 自動以 Secondary 加回；切換成功且 Router 跟上 | ✅ | ✅ |
+| 11 | 三台全停再啟動，`rebootClusterFromCompleteOutage()` | 三台回到 `ONLINE` | ✅ seed 為 db3 | ✅ seed 為 db1 |
+
+**錯誤處理紀錄**：
+
+- 缺 `!includedir`：環境 A 遇到，補上後通過。
+- `mysqlsh -e` 不加 `--no-wizard` 卡住：兩個環境都重現；`--no-wizard` 搭配只寫 `-p` 變成空密碼：環境 A 遇到，改成 `-p'密碼'` 解決。
+- 切換瞬間的 `ERROR 2013`：環境 A 遇到，屬預期行為，文中已補上應用程式重試的提醒。
+- `--conf-use-sockets` 的 socket 連不到：環境 B 遇到，改走 TCP。
+- `firewalld` 在容器內無法測試，未驗證。
 
 ## 小結
 
 - InnoDB Cluster = Group Replication + MySQL Shell + MySQL Router，上一篇手動處理的 GTID、復原帳號、bootstrap 都由 AdminAPI 代勞。
 - 新節點用 Clone 補資料，不需要 `mysqldump`。
-- 實測 Primary 停機後，Router 自動把 6446 導到新 Primary；舊 Primary 回來自動以 Secondary 加入。
-- 全叢集停機用 `rebootClusterFromCompleteOutage()` 恢復。
+- 實測 Primary 停機後，Router 自動把 6446 導到新 Primary；舊 Primary 回來自動以 Secondary 加入。切換瞬間的連線會斷，應用程式要能重試。
+- 全叢集停機用 `rebootClusterFromCompleteOutage()` 恢復，新的 Primary 會是 GTID 最多的那台。
 
 這個系列到這裡告一段落。回到 [高可用與災難復原]({% post_url 2026-10-24-mysql-ops-03-ha-dr %}) 可以看各種方案的 RPO / RTO 比較。
 

@@ -324,6 +324,22 @@ Rpl_semi_sync_replica_status	ON
 
 `SET PERSIST` 會覆蓋設定檔的值（寫在 `mysqld-auto.cnf`），記得也把 `semisync.cnf` 改成一致，避免日後有人看設定檔誤判角色。
 
+## 驗證方式與結果
+
+驗證環境與 [GTID 篇的「驗證方式與結果」]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 相同：環境 A 是 Rocky Linux 9 容器 + systemd、用 dnf 安裝（Mac M4 / aarch64），環境 B 是 Percona 官方映像 + systemd（x86_64）。每次從全新的三台主機開始，先照 GTID 篇建好一主兩從，再做本篇。
+
+| 步驟 | 怎麼驗證 | 判定通過的條件 | 環境 A | 環境 B |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | 在 `super_read_only` 的從庫 `INSTALL PLUGIN` | 回 `ERROR 1290`（證明要改用設定檔） | ✅ | ✅ |
+| 2~4 | `information_schema.PLUGINS`、`SHOW GLOBAL VARIABLES/STATUS` | 外掛 `ACTIVE`、`source_status=ON`、`clients=2`、從庫 `replica_status=ON` | ✅ | ✅ |
+| 5 | 寫入前後比對 `Rpl_semi_sync_source_yes_tx` | `yes_tx` +1 | ✅ 平均等待 190 µs | ✅ 591 µs |
+| 6 停一台 | `STOP REPLICA IO_THREAD` 後寫入並計時 | 不延遲、`status` 仍 `ON` | ✅ 0.004 s | ✅ 0.013 s |
+| 6 停兩台 | 同上 | 延遲約等於 timeout、`status=OFF`、`no_tx` +1、錯誤日誌出現 MY-011161 / MY-011153 | ✅ 1.008 s | ✅ 1.015 s |
+| 6 恢復 | `START REPLICA IO_THREAD` 後寫入 | `status` 回到 `ON`、從庫資料 7 筆齊全 | ✅ | ✅ |
+| 主從互換 | 依 GTID 篇步驟 9 切換並互換開關 | 新主庫 `clients=2`、兩台從庫 `replica_status=ON` | ✅ | ✅ |
+
+**錯誤處理紀錄**：`INSTALL PLUGIN` 被 `super_read_only` 擋下（兩個環境都重現），改用 `plugin_load_add`；「先重啟從庫、後重啟主庫」造成從庫要等 60 秒才重連，是在環境 B 遇到，改成先重啟主庫後解決。
+
 ## 小結
 
 - 從庫有 `super_read_only` 時，用 `plugin_load_add` 載入外掛比 `INSTALL PLUGIN` 好用。

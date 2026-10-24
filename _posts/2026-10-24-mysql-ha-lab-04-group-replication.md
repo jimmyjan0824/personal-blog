@@ -47,7 +47,7 @@ sudo semanage port -a -t mysqld_port_t -p tcp 33061
 
 ## 步驟 1：安裝 Percona Server（三台都做）
 
-與 [GTID 篇的步驟 1]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 相同（**未實測**）：
+與 [GTID 篇的步驟 1]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 相同：
 
 ```bash
 sudo dnf install -y https://repo.percona.com/yum/percona-release-latest.noarch.rpm
@@ -58,6 +58,12 @@ sudo dnf install -y percona-server-server
 GR 外掛已經包含在 `percona-server-server` 裡，不需要另外安裝：`/usr/lib64/mysql/plugin/group_replication.so`。
 
 ## 步驟 2：設定檔（三台都放）
+
+dnf 安裝的 `/etc/my.cnf` 沒有 `!includedir /etc/my.cnf.d`，**先補上**，否則下面的 `gr.cnf` 不會被讀到（原因與實測錯誤見 [GTID 篇步驟 2-1]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %})）：
+
+```bash
+grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf
+```
 
 先產生一個 UUID 當群組名稱，三台要一樣：
 
@@ -380,8 +386,30 @@ MGR 本身**不提供**連線導向，主庫換了之後應用程式不會知道
 
 | 現象 | 原因 | 解法 |
 | :--- | :--- | :--- |
+| `gr.cnf` 的設定沒生效、`gtid_mode=OFF` | dnf 版 `/etc/my.cnf` 沒有 `!includedir` | 第一次啟動前補上 |
 | `This member has more executed transactions than those present in the group` | 改 root 密碼產生了本機 GTID | 全新節點加入前 `RESET MASTER` |
 | `ERROR 3098 ... does not comply with the requirements by an external plugin` | 表沒有主鍵 | 每張表都要有主鍵 |
+
+## 驗證方式與結果
+
+驗證環境與 [GTID 篇的「驗證方式與結果」]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 相同（環境 A：Rocky 9 容器 + dnf 安裝，Mac M4；環境 B：Percona 官方映像，Linux x86_64），每次從全新的三台主機開始。
+
+| 步驟 | 怎麼驗證 | 判定通過的條件 | 環境 A | 環境 B |
+| :--- | :--- | :--- | :--- | :--- |
+| 3 | `information_schema.PLUGINS` | `group_replication` 為 `ACTIVE` | ✅ | ✅ |
+| 4 | `SELECT @@gtid_executed` | `RESET MASTER` 前各有一筆本機 GTID，之後清空 | ✅ | ✅ |
+| 6~7 | `performance_schema.replication_group_members` | 三台 `ONLINE`，一台 `PRIMARY` | ✅ | ✅ |
+| 8 | Secondary 查資料、寫入；建立無主鍵表後寫入 | 資料一致；寫入回 `ERROR 1290`；無主鍵寫入回 `ERROR 3098` | ✅ | ✅ |
+| 9 | `systemctl stop mysqld` 停掉 Primary，查成員表與錯誤日誌 | 剩下兩台自動選出新 Primary 且可寫入 | ✅ 停機 6.6 秒後 db2 成為 Primary | ✅ db2 成為 Primary |
+| 10 | `systemctl start mysqld` | 舊 Primary 以 `SECONDARY` 自動加回，資料齊全 | ✅ | ✅ |
+| 11 | `group_replication_set_as_primary()` | 指定節點成為 `PRIMARY` | ✅ | ✅ |
+
+**錯誤處理紀錄**：
+
+- 缺 `!includedir`：環境 A 遇到，補上後通過（環境 B 的官方映像已有這行）。
+- 少做 `RESET MASTER` 造成 `ERROR 3092`：環境 B 遇到，錯誤日誌原文見步驟 4，清掉後重新 `START GROUP_REPLICATION` 即可加入。
+- 無主鍵表的 `ERROR 3098`：兩個環境都重現。
+- `firewalld`、SELinux（`semanage port`）在容器內無法測試，未驗證。
 
 ## 小結
 

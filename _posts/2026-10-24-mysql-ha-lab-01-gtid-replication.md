@@ -43,9 +43,6 @@ SELinux 維持 `Enforcing` 即可，Percona 的 RPM 使用預設的 `/var/lib/my
 
 ## 步驟 1：安裝 Percona Server（兩台都做）
 
-> 這一步**未實測**：測試環境連不到 `repo.percona.com`。指令依 Percona 官方文件撰寫，實測環境直接使用 Percona 官方映像裡已安裝好的同版本 el9 RPM。
-{: .prompt-warning }
-
 ```bash
 # 安裝 percona-release 工具並啟用 ps80 套件庫
 sudo dnf install -y https://repo.percona.com/yum/percona-release-latest.noarch.rpm
@@ -56,26 +53,72 @@ sudo dnf install -y percona-server-server
 # sudo dnf install -y percona-server-server-8.0.46-37.1.el9
 ```
 
-裝好後確認套件與版本（以下為實測輸出）：
+實測輸出（Rocky Linux 9 容器，aarch64；x86_64 主機上架構字樣會是 `x86_64`）：
 
 ```console
+# dnf install -y https://repo.percona.com/yum/percona-release-latest.noarch.rpm
+Installed:
+  percona-release-1.0-34.noarch
+
+# percona-release setup ps80
+* Disabling all Percona Repositories
+* Enabling the Percona Server for MySQL 8.0 repository
+<*> All done!
+
+# dnf install -y percona-server-server
+Installing:
+ percona-server-server     aarch64  8.0.46-37.1.el9          ps-80-release-aarch64       58 M
+Install  81 Packages
+Complete!
+
 # rpm -qa | grep -E "^percona-server" | sort
-percona-server-client-8.0.46-37.1.el9.x86_64
-percona-server-devel-8.0.46-37.1.el9.x86_64
-percona-server-rocksdb-8.0.46-37.1.el9.x86_64
-percona-server-server-8.0.46-37.1.el9.x86_64
-percona-server-shared-8.0.46-37.1.el9.x86_64
+percona-server-client-8.0.46-37.1.el9.aarch64
+percona-server-server-8.0.46-37.1.el9.aarch64
+percona-server-shared-8.0.46-37.1.el9.aarch64
 
 # mysqld --version
-/usr/sbin/mysqld  Ver 8.0.46-37 for Linux on x86_64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
+/usr/sbin/mysqld  Ver 8.0.46-37 for Linux on aarch64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
 ```
 
-> 用 `dnf` 安裝時只會帶入 `server`、`client`、`shared` 等相依套件；`devel`、`rocksdb` 是官方映像額外裝的，實際主機上沒有也沒關係。
-{: .prompt-info }
+- 撰寫時 ps80 套件庫的最新版就是 8.0.46-37.1（`dnf --showduplicates list percona-server-server` 最後三版為 8.0.44、8.0.45、8.0.46）。
+- Rocky 9 不像 Rocky 8 需要先 `dnf module disable mysql`，`percona-release setup ps80` 直接就能用。
+- 安裝時會一併帶入 `percona-telemetry-agent`（Percona 的匿名使用統計），在沒有 SELinux 的環境會看到一行 `chcon: can't apply partial context to unlabeled file '/usr/local/percona/telemetry/ps'`，無害。
 
 ## 步驟 2：設定檔（兩台都做）
 
-Percona 的 `/etc/my.cnf` 最後一行是 `!includedir /etc/my.cnf.d`，所以把複製相關設定獨立放一個檔案，日後比較好維護：
+### 2-1. 先讓 mysqld 讀取 /etc/my.cnf.d
+
+本系列把設定放在 `/etc/my.cnf.d/` 底下的獨立檔案，日後比較好維護。但**用 dnf 安裝的 Percona，`/etc/my.cnf` 沒有 `!includedir /etc/my.cnf.d` 這一行**，放進去的檔案根本不會被讀到。實測 RPM 裝好的原始檔內容：
+
+```console
+# grep -v "^#" /etc/my.cnf | grep -v "^$"
+[mysqld]
+datadir=/var/lib/mysql
+socket=/var/lib/mysql/mysql.sock
+log-error=/var/log/mysqld.log
+pid-file=/var/run/mysqld/mysqld.pid
+
+# rpm -qf /etc/my.cnf
+percona-server-server-8.0.46-37.1.el9.aarch64
+```
+
+在**第一次啟動 mysqld 之前**補上（可重複執行，已有就不會再加）：
+
+```bash
+grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf
+```
+
+> 漏掉這一步不會有任何啟動錯誤，但設定全部沒生效。實測照做到後面才一連串出錯：
+>
+> - `@@server_id` 兩台都是 `1`、`@@gtid_mode` 是 `OFF`，binlog 檔名是預設的 `binlog.000001` 而不是 `mysql-bin`。
+> - `mysqldump --set-gtid-purged=ON` → `Error: Server has GTIDs disabled.`
+> - `CHANGE REPLICATION SOURCE TO` → `ERROR 1777 (HY000) at line 1: CHANGE REPLICATION SOURCE TO SOURCE_AUTO_POSITION = 1 cannot be executed because @@GLOBAL.GTID_MODE = OFF.`
+> - `WAIT_FOR_EXECUTED_GTID_SET()` → `ERROR 3062 (HY000) at line 1: Cannot use WAIT_FOR_EXECUTED_GTID_SET when GTID_MODE = OFF.`
+>
+> Percona 官方 Docker 映像的 `/etc/my.cnf` 有這一行（是映像自己加的），所以只用官方映像測試的話不會發現。另一個做法是把設定直接寫進 `/etc/my.cnf` 的 `[mysqld]` 區段。
+{: .prompt-danger }
+
+### 2-2. 複製設定檔
 
 ```ini
 # /etc/my.cnf.d/gtid.cnf
@@ -100,6 +143,9 @@ innodb_flush_log_at_trx_commit = 1
 ```
 
 `db2` 把 `server_id` 改成 `2`、`report_host` 改成 `db2`。
+
+> 8.0.34 起 `binlog_format` 標為棄用，啟動時錯誤日誌會出現 `[Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.`。8.0 的預設值本來就是 `ROW`，寫出來只是讓設定一目了然，不寫也可以。
+{: .prompt-info }
 
 > 從庫的 `read_only` / `super_read_only` **先不要寫進設定檔**。第一次啟動時 root 密碼是過期的，必須先 `ALTER USER`，而 `super_read_only=ON` 會把這個動作擋掉：
 >
@@ -412,14 +458,88 @@ db1# mysql -e "SELECT id,item,amount FROM shop.orders; SELECT @@gtid_executed;"
 
 | 現象 | 原因 | 解法 |
 | :--- | :--- | :--- |
+| `gtid_mode` 是 `OFF`、`ERROR 1777`、`Server has GTIDs disabled` | dnf 版 `/etc/my.cnf` 沒有 `!includedir`，`/etc/my.cnf.d/` 的設定沒被讀到 | 第一次啟動前補上 `!includedir /etc/my.cnf.d` |
 | 改 root 密碼出現 `ERROR 1290 ... --super-read-only` | 設定檔先開了 `super_read_only` | 唯讀等密碼改完再用 `SET PERSIST` 開 |
 | `.my.cnf` 設好密碼仍 `Access denied` | 密碼含 `#` 被當成註解 | `password="..."` 加引號 |
 | `Authentication requires secure connection` | `caching_sha2_password` 需要 SSL 或公鑰 | `SOURCE_SSL = 1` 或 `GET_SOURCE_PUBLIC_KEY = 1` |
 | 切換時 `Host 'db1' is not allowed to connect` | 匯入 `mysql.user` 後沒有 flush | `mysqldump` 加 `--flush-privileges` |
 | 從庫多一筆自己的 GTID | 初始化時 `ALTER USER` 寫了 binlog | 匯入前 `RESET MASTER` |
 
+## 驗證方式與結果
+
+**驗證環境**
+
+| 項目 | 環境 A（主要） | 環境 B |
+| :--- | :--- | :--- |
+| 主機 | MacBook Air M4，macOS 15.7 | Linux 雲端主機 |
+| 容器 | Docker Desktop 4.96，`rockylinux:9` + systemd | Docker 29，`percona/percona-server:8.0.46-37.1`（RHEL 9 UBI）+ systemd |
+| Percona 安裝方式 | 照步驟 1 用 `dnf` 從 `repo.percona.com` 安裝 | 映像內建同版本 el9 RPM |
+| 架構 | aarch64 | x86_64 |
+
+兩台節點各是一個 privileged 容器，以 `/usr/sbin/init`（systemd）為 PID 1，所以 `systemctl enable --now mysqld`、`mysqld_pre_systemd` 產生臨時密碼都是真實流程。節點之間用固定 IP 的 Docker 網路（192.168.56.0/24）並設好主機名。每篇開始前都 `docker compose down && docker compose up -d`，從全新的主機開始照文章操作。
+
+環境 A 的建置檔如下，想自己重現的話，把兩個檔案放在同一個資料夾執行 `docker compose build && docker compose up -d`，再用 `docker compose exec db1 bash` 進入節點，從步驟 2 開始做（步驟 0 的 hosts 由 compose 設定，步驟 1 在 build 時完成）。
+
+```dockerfile
+# Dockerfile：Rocky Linux 9 + systemd + 從 repo.percona.com 安裝 Percona
+FROM rockylinux:9
+# 固定版本時用 --build-arg PS_VER=-8.0.46-37.1.el9
+ARG PS_VER=""
+RUN dnf install -y systemd procps-ng iproute hostname which less vim-minimal bc \
+ && dnf install -y https://repo.percona.com/yum/percona-release-latest.noarch.rpm \
+ && percona-release setup -y ps80 \
+ && dnf install -y percona-server-server${PS_VER} percona-server-client${PS_VER} \
+                   percona-mysql-shell percona-mysql-router \
+ && dnf clean all
+RUN systemctl mask systemd-logind.service getty.target console-getty.service \
+ && (systemctl disable mysqld mysqlrouter 2>/dev/null; true)
+STOPSIGNAL SIGRTMIN+3
+CMD ["/usr/sbin/init"]
+```
+
+```yaml
+# compose.yaml：db1~db3 與 router 四台「主機」
+x-node: &node
+  image: rocky9-percona80
+  privileged: true            # systemd 當 PID 1 需要
+  cgroup: host
+  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw"]
+  tmpfs: ["/run", "/run/lock"]
+  extra_hosts:
+    - "db1:192.168.56.11"
+    - "db2:192.168.56.12"
+    - "db3:192.168.56.13"
+    - "router:192.168.56.20"
+services:
+  db1:    { <<: *node, build: ., hostname: db1,    networks: { labnet: { ipv4_address: 192.168.56.11 } } }
+  db2:    { <<: *node, hostname: db2,    networks: { labnet: { ipv4_address: 192.168.56.12 } } }
+  db3:    { <<: *node, hostname: db3,    networks: { labnet: { ipv4_address: 192.168.56.13 } } }
+  router: { <<: *node, hostname: router, networks: { labnet: { ipv4_address: 192.168.56.20 } } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 192.168.56.0/24 } ] }
+```
+
+**驗證項目**
+
+| 步驟 | 怎麼驗證 | 判定通過的條件 | 結果 |
+| :--- | :--- | :--- | :--- |
+| 1 安裝 | `rpm -qa`、`mysqld --version` | 8.0.46-37.1 | ✅ A、B |
+| 2~3 設定與啟動 | `SELECT @@server_id, @@gtid_mode ...` | 各台 `server_id` 不同、`gtid_mode=ON` | ✅ A（補 includedir 後）、B |
+| 5 建從庫 | `grep GTID_PURGED full.sql`；匯入後比對 `gtid_executed` | 從庫 `gtid_executed` = 主庫 dump 時的集合 | ✅ A、B |
+| 6 建立複製 | `SHOW REPLICA STATUS\G` | IO / SQL 都 `Yes`、`Last_*_Error` 空白 | ✅ A、B |
+| 8 資料同步 | 主庫寫入後到從庫查詢、比對 `gtid_executed` | 資料與 GTID 集合一致；從庫寫入回 `ERROR 1290` | ✅ A、B |
+| 9 Switchover | `WAIT_FOR_EXECUTED_GTID_SET()`、反向複製後在新主庫寫入 | 回傳 `0`；舊主庫收到新主庫的交易 | ✅ A、B |
+
+**錯誤處理紀錄**（對應上方「實測踩到的坑」）：
+
+- 缺 `!includedir`：環境 A 遇到（環境 B 的官方映像已有這行），補上後重做全部通過。
+- `.my.cnf` 密碼沒加引號、少 `SOURCE_SSL = 1`：兩個環境都重現，錯誤訊息與文中相同。
+- `super_read_only` 擋 `ALTER USER`、缺 `--flush-privileges`、從庫多一筆 GTID：環境 B 遇到並處理。
+
 ## 小結
 
+- dnf 安裝後先補 `!includedir /etc/my.cnf.d`，否則 `/etc/my.cnf.d/` 的設定都不會生效。
 - 8.0 建複製一律用 GTID + `SOURCE_AUTO_POSITION = 1`，切換只要比對 GTID 集合。
 - 建從庫前先 `RESET MASTER`，dump 時加 `--set-gtid-purged=ON --flush-privileges`。
 - 從庫用 `SET PERSIST super_read_only = ON` 防止誤寫。

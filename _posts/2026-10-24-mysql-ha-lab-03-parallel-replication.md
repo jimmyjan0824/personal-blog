@@ -100,20 +100,47 @@ workers=8 tracking=COMMIT_ORDER  catch-up=15.0s
 workers=8 tracking=WRITESET      catch-up=5.2s
 ```
 
-| 情境 | 單執行緒 | 8 workers + COMMIT_ORDER | 8 workers + WRITESET |
-| :--- | ---: | ---: | ---: |
-| 主庫 8 連線併發 | 51.9 秒 | 21.4 秒 | 21.7 秒 |
-| 主庫單一連線 | 12.5 秒 | 15.0 秒 | **5.2 秒** |
+上面兩組是環境 B（Linux / x86_64）的結果。在環境 A（Mac M4 上的 Rocky 9 容器）用同一支腳本重跑：
+
+```console
+## 結果一 C=8 Q=40000
+workers=1 tracking=COMMIT_ORDER  catch-up=32.4s
+workers=8 tracking=COMMIT_ORDER  catch-up=10.0s
+workers=8 tracking=WRITESET  catch-up=17.8s
+## 結果一重跑（8 workers，兩種模式交替）
+workers=8 tracking=WRITESET  catch-up=35.0s
+workers=8 tracking=COMMIT_ORDER  catch-up=33.8s
+workers=8 tracking=WRITESET  catch-up=26.1s
+workers=8 tracking=COMMIT_ORDER  catch-up=25.3s
+## 結果二 C=1 Q=10000
+workers=1 tracking=COMMIT_ORDER  catch-up=9.0s
+workers=8 tracking=COMMIT_ORDER  catch-up=12.0s
+workers=8 tracking=WRITESET  catch-up=3.2s
+```
+
+| 情境 | 環境 | 單執行緒 | 8 workers + COMMIT_ORDER | 8 workers + WRITESET |
+| :--- | :--- | ---: | ---: | ---: |
+| 主庫 8 連線併發 | B | 51.9 秒 | 21.4 秒 | 21.7 秒 |
+| 主庫 8 連線併發 | A | 32.4 秒 | 10.0~33.8 秒 | 17.8~35.0 秒 |
+| 主庫單一連線 | B | 12.5 秒 | 15.0 秒 | **5.2 秒** |
+| 主庫單一連線 | A | 9.0 秒 | 12.0 秒 | **3.2 秒** |
 
 解讀：
 
-- 主庫本身併發高時，`COMMIT_ORDER` 的 group commit 已經有足夠平行度，加 worker 就能把追趕時間砍到四成左右，`WRITESET` 沒有額外好處。
+- 主庫本身併發高時，`COMMIT_ORDER` 的 group commit 已經有足夠平行度，加 worker 可以明顯縮短追趕時間，`WRITESET` 沒有穩定的額外好處。這組量測每次差異很大（環境 A 同一設定重跑在 10~35 秒之間），只能看出「兩種模式差不多」，不要拿單次數字比較。
 - 主庫是**單一連線**（批次作業、ETL、單執行緒的應用）時，`COMMIT_ORDER` 下每筆交易都依賴前一筆，開 8 個 worker 反而因為協調成本更慢（12.5 → 15.0 秒）；改成 `WRITESET` 後降到 5.2 秒。
+- 結果二在兩個環境的趨勢完全一致，是本篇最可靠的結論。
 - 這是同一台實體機上的容器測試，絕對數字沒有參考價值，請看相對差異。
 
 ## 步驟 3：從 binlog 看差異
 
-主庫單一連線寫 5 筆，用 `mysqlbinlog` 看 `last_committed` 與 `sequence_number`：
+切換模式後先 `FLUSH BINARY LOGS` 換一個新的 binlog 檔，再用主庫單一連線寫 5 筆，用 `mysqlbinlog` 看 `last_committed` 與 `sequence_number`：
+
+```bash
+mysql -e "SET GLOBAL binlog_transaction_dependency_tracking = COMMIT_ORDER; FLUSH BINARY LOGS;"   # 或 WRITESET
+mysqlslap --create-schema=shop --concurrency=1 --iterations=1 --number-of-queries=5 \
+  --query="INSERT INTO shop.pbench(v) VALUES (RAND())"
+```
 
 `COMMIT_ORDER`：每筆的 `last_committed` 都是前一筆，必須依序套用。
 
@@ -138,6 +165,9 @@ last_committed=1	sequence_number=3
 last_committed=1	sequence_number=4
 last_committed=1	sequence_number=5
 ```
+
+> 編號是在同一個 binlog 檔內累計的。沒有先 `FLUSH BINARY LOGS` 的話，前面跑過量測的檔案裡已經有幾十萬筆交易，看到的會是 `last_committed=310212 sequence_number=310213` 這種大數字（環境 A 實測），判讀方式相同：`WRITESET` 下連續幾筆的 `last_committed` 相同。
+{: .prompt-tip }
 
 ## 步驟 4：寫入設定檔（三台都放）
 
@@ -164,11 +194,14 @@ replica_preserve_commit_order  = ON                 # 8.0.27+ 預設值，保持
 +------------------------------------------+------------------------------------+-------------------------+----------------------------+---------------------------------+
 ```
 
-啟動時錯誤日誌會有一行棄用警告，**這是預期的**，8.0 要用 WRITESET 只能這樣設定：
+啟動時錯誤日誌會有棄用警告，**這是預期的**，8.0 要用 WRITESET 只能這樣設定：
 
 ```console
+[Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
 [Warning] [MY-011069] [Server] The syntax '--binlog-transaction-dependency-tracking' is deprecated and will be removed in a future release.
 ```
+
+第一行來自 GTID 篇設定檔裡的 `binlog_format = ROW`，和本篇無關，見 GTID 篇的說明。
 
 > 不要把 `replica_parallel_type`、`transaction_write_set_extraction` 寫進設定檔。它們的預設值已經是 `LOGICAL_CLOCK` 與 `XXHASH64`，實測寫進去只會在啟動時多出兩行同樣的棄用警告。
 {: .prompt-tip }
@@ -205,6 +238,20 @@ db2# mysql -e "SELECT WORKER_ID, THREAD_ID, SERVICE_STATE, LAST_APPLIED_TRANSACT
 - **大交易**：一筆刪除一千萬列的交易只能由一個 worker 執行，要從應用端拆小。
 - **沒有主鍵的表**：ROW 格式下從庫要全表掃描才找得到資料列，而且 WRITESET 無法判斷衝突。所有表都應該有主鍵。
 - **DDL**：DDL 會讓所有 worker 等它做完。
+
+## 驗證方式與結果
+
+驗證環境與 [GTID 篇的「驗證方式與結果」]({% post_url 2026-10-24-mysql-ha-lab-01-gtid-replication %}) 相同（環境 A：Rocky 9 容器 + dnf 安裝，Mac M4；環境 B：Percona 官方映像，Linux x86_64），都是先照 GTID 篇建好一主兩從。
+
+| 步驟 | 怎麼驗證 | 判定通過的條件 | 環境 A | 環境 B |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | 查詢 5 個相關變數 | 4 / LOGICAL_CLOCK / 1 / COMMIT_ORDER / XXHASH64 | ✅ | ✅ |
+| 2 | 量測腳本，比較從庫追平時間 | 單一連線時 WRITESET + 8 workers 明顯最快 | ✅ 3.2 秒 | ✅ 5.2 秒 |
+| 3 | `mysqlbinlog` 看 `last_committed` | COMMIT_ORDER 逐筆遞增；WRITESET 連續相同 | ✅ | ✅ |
+| 4 | 重啟後查詢變數 | WRITESET / 8 workers 生效 | ✅ | ✅ |
+| 5 | `replication_applier_status_by_worker` | 8 個 worker 都是 `ON` | ✅ | ✅ |
+
+**錯誤處理紀錄**：本篇沒有錯誤。和文章不一致的只有兩處，都已補進文中：binlog 編號沒從 1 開始（要先 `FLUSH BINARY LOGS`），以及多一行 `binlog_format` 棄用警告。
 
 ## 小結
 
