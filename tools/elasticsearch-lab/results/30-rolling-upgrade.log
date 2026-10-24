@@ -1,0 +1,715 @@
+
+======== 環境：8.19.23 三節點 ========  (2026-10-24 22:18:46)
+[esu1]# cat /etc/rocky-release; rpm -q elasticsearch; cat /etc/yum.repos.d/elasticsearch.repo | grep baseurl
+Rocky Linux release 9.8 (Blue Onyx)
+elasticsearch-8.19.23-1.aarch64
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+
+[esu1]# cd /usr/share/elasticsearch && bin/elasticsearch-certutil ca --pem --days 3650 --out /root/es-ca.zip -s && python3 -m zipfile -e /root/es-ca.zip /root/es-ca && bin/elasticsearch-certutil cert --pem --days 825 --ca-cert /root/es-ca/ca/ca.crt --ca-key /root/es-ca/ca/ca.key --in /root/conf/instances.yml --out /root/es-certs.zip -s && python3 -m zipfile -e /root/es-certs.zip /root/es-certs && rm -rf /mnt/es-snapshots/.dist && mkdir -p /mnt/es-snapshots/.dist/ca && cp -r /root/es-certs /mnt/es-snapshots/.dist/ && cp /root/es-ca/ca/ca.crt /mnt/es-snapshots/.dist/ca/ && ls /mnt/es-snapshots/.dist/es-certs
+esc1
+esc2
+esc3
+esc4
+esd9
+esu1
+esu2
+esu3
+
+[esu1]# cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-elasticsearch.conf >/dev/null  && mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/ && systemctl daemon-reload  && cd /etc/elasticsearch && rm -f certs/http_ca.crt certs/http.p12 certs/transport.p12  && for k in xpack.security.http.ssl.keystore.secure_password xpack.security.transport.ssl.keystore.secure_password xpack.security.transport.ssl.truststore.secure_password; do /usr/share/elasticsearch/bin/elasticsearch-keystore remove $k 2>/dev/null; done;  install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/esu1/esu1.crt certs/node.crt && install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/esu1/esu1.key certs/node.key && install -o root -g elasticsearch -m 644 /mnt/es-snapshots/.dist/ca/ca.crt certs/ca.crt  && sed -e 's/^node.name: .*/node.name: esu1/' -e 's/^network.host: .*/network.host: 192.168.60.31/'  /root/conf/elasticsearch-upgrade.yml > elasticsearch.yml && chown root:elasticsearch elasticsearch.yml && chmod 660 elasticsearch.yml  && install -o root -g elasticsearch -m 660 /root/conf/heap.options /root/conf/lab-heap.options jvm.options.d/  && /usr/share/elasticsearch/bin/elasticsearch-keystore list | tr '\n' ' ' && echo && ls certs && grep -E '^(cluster.name|node.name|node.roles|network.host)' elasticsearch.yml
+autoconfiguration.password_hash keystore.seed 
+ca.crt
+node.crt
+node.key
+cluster.name: es-upgrade
+node.name: esu1
+node.roles: [ master, data, ingest ]
+network.host: 192.168.60.31
+
+[esu2]# cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-elasticsearch.conf >/dev/null  && mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/ && systemctl daemon-reload  && cd /etc/elasticsearch && rm -f certs/http_ca.crt certs/http.p12 certs/transport.p12  && for k in xpack.security.http.ssl.keystore.secure_password xpack.security.transport.ssl.keystore.secure_password xpack.security.transport.ssl.truststore.secure_password; do /usr/share/elasticsearch/bin/elasticsearch-keystore remove $k 2>/dev/null; done;  install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/esu2/esu2.crt certs/node.crt && install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/esu2/esu2.key certs/node.key && install -o root -g elasticsearch -m 644 /mnt/es-snapshots/.dist/ca/ca.crt certs/ca.crt  && sed -e 's/^node.name: .*/node.name: esu2/' -e 's/^network.host: .*/network.host: 192.168.60.32/'  /root/conf/elasticsearch-upgrade.yml > elasticsearch.yml && chown root:elasticsearch elasticsearch.yml && chmod 660 elasticsearch.yml  && install -o root -g elasticsearch -m 660 /root/conf/heap.options /root/conf/lab-heap.options jvm.options.d/  && /usr/share/elasticsearch/bin/elasticsearch-keystore list | tr '\n' ' ' && echo && ls certs && grep -E '^(cluster.name|node.name|node.roles|network.host)' elasticsearch.yml
+autoconfiguration.password_hash keystore.seed 
+ca.crt
+node.crt
+node.key
+cluster.name: es-upgrade
+node.name: esu2
+node.roles: [ master, data, ingest ]
+network.host: 192.168.60.32
+
+[esu3]# cp /root/conf/99-elasticsearch.conf /etc/sysctl.d/ && sysctl -p /etc/sysctl.d/99-elasticsearch.conf >/dev/null  && mkdir -p /etc/systemd/system/elasticsearch.service.d && cp /root/conf/override.conf /etc/systemd/system/elasticsearch.service.d/ && systemctl daemon-reload  && cd /etc/elasticsearch && rm -f certs/http_ca.crt certs/http.p12 certs/transport.p12  && for k in xpack.security.http.ssl.keystore.secure_password xpack.security.transport.ssl.keystore.secure_password xpack.security.transport.ssl.truststore.secure_password; do /usr/share/elasticsearch/bin/elasticsearch-keystore remove $k 2>/dev/null; done;  install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/esu3/esu3.crt certs/node.crt && install -o root -g elasticsearch -m 640 /mnt/es-snapshots/.dist/es-certs/esu3/esu3.key certs/node.key && install -o root -g elasticsearch -m 644 /mnt/es-snapshots/.dist/ca/ca.crt certs/ca.crt  && sed -e 's/^node.name: .*/node.name: esu3/' -e 's/^network.host: .*/network.host: 192.168.60.33/'  /root/conf/elasticsearch-upgrade.yml > elasticsearch.yml && chown root:elasticsearch elasticsearch.yml && chmod 660 elasticsearch.yml  && install -o root -g elasticsearch -m 660 /root/conf/heap.options /root/conf/lab-heap.options jvm.options.d/  && /usr/share/elasticsearch/bin/elasticsearch-keystore list | tr '\n' ' ' && echo && ls certs && grep -E '^(cluster.name|node.name|node.roles|network.host)' elasticsearch.yml
+autoconfiguration.password_hash keystore.seed 
+ca.crt
+node.crt
+node.key
+cluster.name: es-upgrade
+node.name: esu3
+node.roles: [ master, data, ingest ]
+network.host: 192.168.60.33
+
+[esu1]# rm -rf /mnt/es-snapshots/upgrade && install -d -o elasticsearch -g elasticsearch -m 750 /mnt/es-snapshots/upgrade
+
+[esu1]# systemctl enable -q elasticsearch && systemctl start --no-block elasticsearch && echo started
+started
+
+[esu2]# systemctl enable -q elasticsearch && systemctl start --no-block elasticsearch && echo started
+started
+
+[esu3]# systemctl enable -q elasticsearch && systemctl start --no-block elasticsearch && echo started
+started
+
+（叢集組成：等了 19 秒）
+（esu1 active：等了 0 秒）
+（esu2 active：等了 0 秒）
+（esu3 active：等了 0 秒）
+[esu1]# journalctl -u elasticsearch --no-pager -n 40 | grep -E 'ERROR|setting \[' | cut -c1-400 | tail -5; grep -E '\]\[(WARN|ERROR)' /var/log/elasticsearch/es-upgrade.log | cut -c1-300 | head -10
+[2026-10-24T14:19:11,826][WARN ][i.o.usage                ] [esu1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+[2026-10-24T14:19:12,439][WARN ][o.e.x.i.s.e.a.ElasticInferenceServiceAuthorizationHandler] [esu1] Failed to revoke access to default inference endpoint IDs: [rainbow-sprinkles, rerank-v1, multilingual-embed-v1, elser-v2], error: org.elasticsearch.cluster.block.ClusterBlockException: blocked by: [SE
+
+[esu1] POST /_security/user/elastic/_password
+{"password":"ChangeMe_Elastic_2026"}
+{}
+
+[esu1]# sed -i '/^cluster.initial_master_nodes/d' /etc/elasticsearch/elasticsearch.yml
+
+[esu2]# sed -i '/^cluster.initial_master_nodes/d' /etc/elasticsearch/elasticsearch.yml
+
+[esu3]# sed -i '/^cluster.initial_master_nodes/d' /etc/elasticsearch/elasticsearch.yml
+
+[esu1] GET /_cat/nodes?v&h=name,version,node.role,master
+name version node.role master
+esu2 8.19.23 dim       -
+esu3 8.19.23 dim       -
+esu1 8.19.23 dim       *
+
+
+[esu1] GET /_cluster/health?filter_path=status,number_of_nodes
+{"status":"green","number_of_nodes":3}
+
+
+======== 升級前的資料：orders（3 主分片 1 副本）與內建 logs 範本的 data stream ========  (2026-10-24 22:19:20)
+[esu1] PUT /_component_template/base-settings
+（body：/root/conf/index-template.yaml）
+---
+acknowledged: true
+
+
+[esu1] PUT /_index_template/apps
+{"index_patterns":["orders*","app-*"],"composed_of":["base-settings"],"priority":200,"version":1}
+{"acknowledged":true}
+
+[esu1] PUT /orders
+{"settings":{"index.number_of_shards":3},"mappings":{"dynamic":"strict","properties":{"order_id":{"type":"keyword"},"customer_id":{"type":"keyword"},"status":{"type":"keyword"},"amount":{"type":"scaled_float","scaling_factor":100},"region":{"type":"keyword"},"product":{"type":"keyword"},"qty":{"type":"integer"},"created_at":{"type":"date"},"note":{"type":"text"}}}}
+{"acknowledged":true,"shards_acknowledged":true,"index":"orders"}
+
+[esu1]# /root/bin/gen-orders.sh 100000 > /tmp/orders.ndjson && ES_PW=ChangeMe_Elastic_2026 /root/bin/bulk-load.sh esu1 orders /tmp/orders.ndjson 5000
+docs=100000 batches=20 failed=0 seconds=3.2 docs/s=31588
+
+[esu1] POST /logs-app-default/_doc?refresh=wait_for&filter_path=result,_index
+{"@timestamp":"2026-10-24T08:00:00Z","message":"before upgrade","host":{"name":"web1"}}
+{"_index":".ds-logs-app-default-2026.10.24-000001","result":"created"}
+
+[esu1] GET /_data_stream/logs-app-default?filter_path=data_streams.name,data_streams.indices.index_name,data_streams.index_mode&pretty
+{
+  "data_streams" : [
+    {
+      "name" : "logs-app-default",
+      "indices" : [
+        {
+          "index_name" : ".ds-logs-app-default-2026.10.24-000001"
+        }
+      ],
+      "index_mode" : "standard"
+    }
+  ]
+}
+
+
+[esu1] GET /.ds-logs-app-default-*/_settings/index.mode,index.version.created?flat_settings&include_defaults&filter_path=*.settings,*.defaults.index\.mode&pretty
+{
+  ".ds-logs-app-default-2026.10.24-000001" : {
+    "settings" : {
+      "index.version.created" : "8537000"
+    },
+    "defaults" : {
+      "index.mode" : "standard"
+    }
+  }
+}
+
+
+[esu1] POST /orders/_refresh
+{"_shards":{"total":6,"successful":6,"failed":0}}
+
+[esu1] GET /_cat/indices/orders?v&h=health,index,pri,rep,docs.count,store.size
+health index  pri rep docs.count store.size
+green  orders   3   1     100000     12.3mb
+
+
+
+======== 升級前檢查：deprecation、system features、快照 ========  (2026-10-24 22:19:25)
+[esu1] GET /_migration/deprecations?pretty
+{
+  "cluster_settings" : [ ],
+  "node_settings" : [
+    {
+      "level" : "warning",
+      "message" : "setting [xpack.monitoring.collection.enabled] is deprecated and will be removed after 8.0",
+      "url" : "https://ela.st/es-deprecation-7-monitoring-settings",
+      "details" : "the setting [xpack.monitoring.collection.enabled] is currently set to [false], remove this setting (nodes impacted: [esu1, esu3, esu2])",
+      "resolve_during_rolling_upgrade" : false
+    }
+  ],
+  "ml_settings" : [ ],
+  "ilm_policies" : { },
+  "data_streams" : { },
+  "index_settings" : { },
+  "templates" : { }
+}
+
+
+[esu1] GET /_migration/system_features?filter_path=migration_status,features.feature_name,features.migration_status&pretty
+{
+  "features" : [
+    {
+      "feature_name" : "async_search",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "enrich",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "ent_search",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "fleet",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "geoip",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "inference_plugin",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "kibana",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "logstash_management",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "machine_learning",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "searchable_snapshots",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "security",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "synonyms",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "tasks",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "transform",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    },
+    {
+      "feature_name" : "watcher",
+      "migration_status" : "NO_MIGRATION_NEEDED"
+    }
+  ],
+  "migration_status" : "NO_MIGRATION_NEEDED"
+}
+
+
+[esu1] PUT /_snapshot/upgrade_repo
+{"type":"fs","settings":{"location":"/mnt/es-snapshots/upgrade"}}
+{"acknowledged":true}
+
+[esu1] PUT /_snapshot/upgrade_repo/before-9.5.5?wait_for_completion=true&filter_path=snapshot.snapshot,snapshot.version,snapshot.state,snapshot.shards
+{"indices":"*","include_global_state":true}
+{"snapshot":{"snapshot":"before-9.5.5","version":"8.19.9-8.19.23","state":"SUCCESS","shards":{"total":7,"failed":0,"successful":7}}}
+
+
+======== 滾動升級：非 master 先、master 最後；背景每 0.5 秒寫入一筆 ========  (2026-10-24 22:19:26)
+master=esu1，升級順序：esu2 esu3 esu1
+
+======== 升級 esu2（寫入改送 esu1） ========  (2026-10-24 22:19:26)
+[esu2] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":"primaries"}}
+{"acknowledged":true,"persistent":{"cluster":{"routing":{"allocation":{"enable":"primaries"}}}},"transient":{}}
+
+[esu2] POST /_flush?filter_path=_shards
+{"_shards":{"total":8,"successful":8,"failed":0}}
+
+[esu2]# systemctl stop elasticsearch && echo stopped
+stopped
+
+[esu2]# cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && time dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -vE "B/s \||^\s*$" | tail -25
+Upgrade  1 Package
+Total download size: 662 M
+Downloading Packages:
+--------------------------------------------------------------------------------
+Running transaction check
+Transaction check succeeded.
+Running transaction test
+Transaction test succeeded.
+Running transaction
+  Preparing        :                                                        1/1 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/2 
+  Upgrading        : elasticsearch-9.5.5-1.aarch64                          1/2 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/2 
+Failed to restart systemd-sysctl.service: Unit systemd-sysctl.service not found.
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+  Cleanup          : elasticsearch-8.19.23-1.aarch64                        2/2 
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          2/2 
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+/var/tmp/rpm-tmp.2cQF8r: line 4: /usr/lib/systemd/systemd-sysctl: No such file or directory
+  Verifying        : elasticsearch-9.5.5-1.aarch64                          1/2 
+  Verifying        : elasticsearch-8.19.23-1.aarch64                        2/2 
+Upgraded:
+  elasticsearch-9.5.5-1.aarch64                                                 
+Complete!
+
+real	2m10.675s
+user	0m31.493s
+sys	0m7.433s
+
+[esu2]# rpm -q elasticsearch; ls /etc/elasticsearch/ | grep -E "rpmnew|rpmsave" || echo "(no .rpmnew / .rpmsave)"
+elasticsearch-9.5.5-1.aarch64
+(no .rpmnew / .rpmsave)
+
+[esu2]# systemctl daemon-reload && time systemctl start elasticsearch && systemctl is-active elasticsearch
+
+real	0m12.483s
+user	0m0.001s
+sys	0m0.001s
+active
+
+（esu2 重新加入：等了 0 秒）
+[esu1] GET /_cat/nodes?v&h=name,version,master&s=name
+name version master
+esu1 8.19.23 *
+esu2 9.5.5   -
+esu3 8.19.23 -
+
+
+[esu1] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":null}}
+{"acknowledged":true,"persistent":{},"transient":{}}
+
+（green：等了 1 秒）
+esu2：178 秒
+
+======== 升級 esu3（寫入改送 esu1） ========  (2026-10-24 22:22:24)
+[esu3] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":"primaries"}}
+{"acknowledged":true,"persistent":{"cluster":{"routing":{"allocation":{"enable":"primaries"}}}},"transient":{}}
+
+[esu3] POST /_flush?filter_path=_shards
+{"_shards":{"total":8,"successful":8,"failed":0}}
+
+[esu3]# systemctl stop elasticsearch && echo stopped
+stopped
+
+[esu3]# cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && time dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -vE "B/s \||^\s*$" | tail -25
+Upgrade  1 Package
+Total download size: 662 M
+Downloading Packages:
+--------------------------------------------------------------------------------
+Running transaction check
+Transaction check succeeded.
+Running transaction test
+Transaction test succeeded.
+Running transaction
+  Preparing        :                                                        1/1 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/2 
+  Upgrading        : elasticsearch-9.5.5-1.aarch64                          1/2 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/2 
+Failed to restart systemd-sysctl.service: Unit systemd-sysctl.service not found.
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+  Cleanup          : elasticsearch-8.19.23-1.aarch64                        2/2 
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          2/2 
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+/var/tmp/rpm-tmp.Q7jlpo: line 4: /usr/lib/systemd/systemd-sysctl: No such file or directory
+  Verifying        : elasticsearch-9.5.5-1.aarch64                          1/2 
+  Verifying        : elasticsearch-8.19.23-1.aarch64                        2/2 
+Upgraded:
+  elasticsearch-9.5.5-1.aarch64                                                 
+Complete!
+
+real	2m12.956s
+user	0m31.725s
+sys	0m6.915s
+
+[esu3]# rpm -q elasticsearch; ls /etc/elasticsearch/ | grep -E "rpmnew|rpmsave" || echo "(no .rpmnew / .rpmsave)"
+elasticsearch-9.5.5-1.aarch64
+(no .rpmnew / .rpmsave)
+
+[esu3]# systemctl daemon-reload && time systemctl start elasticsearch && systemctl is-active elasticsearch
+
+real	0m12.412s
+user	0m0.002s
+sys	0m0.000s
+active
+
+（esu3 重新加入：等了 0 秒）
+[esu1] GET /_cat/nodes?v&h=name,version,master&s=name
+name version master
+esu1 8.19.23 *
+esu2 9.5.5   -
+esu3 9.5.5   -
+
+
+[esu1] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":null}}
+{"acknowledged":true,"persistent":{},"transient":{}}
+
+（green：等了 1 秒）
+esu3：150 秒
+
+======== 升級 esu1（寫入改送 esu2） ========  (2026-10-24 22:24:54)
+[esu1] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":"primaries"}}
+{"acknowledged":true,"persistent":{"cluster":{"routing":{"allocation":{"enable":"primaries"}}}},"transient":{}}
+
+[esu1] POST /_flush?filter_path=_shards
+{"_shards":{"total":8,"successful":8,"failed":0}}
+
+[esu1]# systemctl stop elasticsearch && echo stopped
+stopped
+
+[esu1]# cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && time dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -vE "B/s \||^\s*$" | tail -25
+Upgrade  1 Package
+Total download size: 662 M
+Downloading Packages:
+--------------------------------------------------------------------------------
+Running transaction check
+Transaction check succeeded.
+Running transaction test
+Transaction test succeeded.
+Running transaction
+  Preparing        :                                                        1/1 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/2 
+  Upgrading        : elasticsearch-9.5.5-1.aarch64                          1/2 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          1/2 
+Failed to restart systemd-sysctl.service: Unit systemd-sysctl.service not found.
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+  Cleanup          : elasticsearch-8.19.23-1.aarch64                        2/2 
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+  Running scriptlet: elasticsearch-9.5.5-1.aarch64                          2/2 
+  Running scriptlet: elasticsearch-8.19.23-1.aarch64                        2/2 
+/var/tmp/rpm-tmp.KUfMu0: line 4: /usr/lib/systemd/systemd-sysctl: No such file or directory
+  Verifying        : elasticsearch-9.5.5-1.aarch64                          1/2 
+  Verifying        : elasticsearch-8.19.23-1.aarch64                        2/2 
+Upgraded:
+  elasticsearch-9.5.5-1.aarch64                                                 
+Complete!
+
+real	3m14.192s
+user	0m31.257s
+sys	0m7.494s
+
+[esu1]# rpm -q elasticsearch; ls /etc/elasticsearch/ | grep -E "rpmnew|rpmsave" || echo "(no .rpmnew / .rpmsave)"
+elasticsearch-9.5.5-1.aarch64
+(no .rpmnew / .rpmsave)
+
+[esu1]# systemctl daemon-reload && time systemctl start elasticsearch && systemctl is-active elasticsearch
+
+real	0m12.552s
+user	0m0.002s
+sys	0m0.000s
+active
+
+（esu1 重新加入：等了 0 秒）
+[esu2] GET /_cat/nodes?v&h=name,version,master&s=name
+name version master
+esu1 9.5.5   -
+esu2 9.5.5   -
+esu3 9.5.5   *
+
+
+[esu2] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":null}}
+{"acknowledged":true,"persistent":{},"transient":{}}
+
+（green：等了 1 秒）
+esu1：211 秒
+
+======== 升級後 ========  (2026-10-24 22:28:26)
+[esu1] GET /_cat/nodes?v&h=name,version,node.role,master&s=name
+name version node.role master
+esu1 9.5.5   dim       -
+esu2 9.5.5   dim       -
+esu3 9.5.5   dim       *
+
+
+[esu1] GET /?filter_path=version.number,version.lucene_version,version.minimum_wire_compatibility_version,version.minimum_index_compatibility_version&pretty
+{
+  "version" : {
+    "number" : "9.5.5",
+    "lucene_version" : "10.5.1",
+    "minimum_wire_compatibility_version" : "8.19.0",
+    "minimum_index_compatibility_version" : "8.0.0"
+  }
+}
+
+
+[esu1] GET /_cluster/health?filter_path=status,number_of_nodes,active_shards,unassigned_shards
+{"status":"green","number_of_nodes":3,"active_shards":16,"unassigned_shards":0}
+
+背景寫入：共      845 次，HTTP 狀態統計：
+ 845 201
+[esu1] POST /orders/_refresh
+{"_shards":{"total":6,"successful":6,"failed":0}}
+
+[esu1] GET /orders/_count
+{"count":100845,"_shards":{"total":3,"successful":3,"skipped":0,"failed":0}}
+
+[esu1] GET /orders/_settings/index.version.created,index.version.compatibility?flat_settings&include_defaults&filter_path=*.settings,*.defaults&pretty
+{
+  "orders" : {
+    "settings" : {
+      "index.version.created" : "8537000"
+    },
+    "defaults" : {
+      "index.version.compatibility" : "8537000"
+    }
+  }
+}
+
+
+[esu1] GET /_migration/deprecations?filter_path=cluster_settings,node_settings,index_settings&pretty
+{
+  "cluster_settings" : [ ],
+  "node_settings" : [
+    {
+      "level" : "critical",
+      "message" : "Setting [xpack.monitoring.collection.enabled] is deprecated",
+      "url" : "https://ela.st/es-10-legacy-monitoring-removal",
+      "details" : "Remove the [xpack.monitoring.collection.enabled] setting. This setting will be removed in 10.0. (nodes impacted: [esu3, esu2, esu1])",
+      "resolve_during_rolling_upgrade" : false
+    }
+  ],
+  "index_settings" : {
+    "orders" : [
+      {
+        "level" : "critical",
+        "message" : "Old index with a compatibility version < 9.0",
+        "url" : "https://ela.st/es-deprecation-9-index-version",
+        "details" : "This index has version: 8.19.9-8.19.22",
+        "resolve_during_rolling_upgrade" : false,
+        "_meta" : {
+          "reindex_required" : true
+        }
+      }
+    ]
+  }
+}
+
+
+[esu1] POST /logs-app-default/_rollover?filter_path=old_index,new_index,rolled_over
+{"old_index":".ds-logs-app-default-2026.10.24-000001","new_index":".ds-logs-app-default-2026.10.24-000002","rolled_over":true}
+
+[esu1] POST /logs-app-default/_doc?refresh=wait_for&filter_path=result,_index
+{"@timestamp":"2026-10-24T09:00:00Z","message":"after upgrade","host":{"name":"web1"}}
+{"_index":".ds-logs-app-default-2026.10.24-000002","result":"created"}
+
+[esu1] GET /.ds-logs-app-default-*/_settings/index.mode,index.version.created?flat_settings&include_defaults&filter_path=*.settings,*.defaults.index\.mode&pretty
+{
+  ".ds-logs-app-default-2026.10.24-000002" : {
+    "settings" : {
+      "index.version.created" : "9111000"
+    },
+    "defaults" : {
+      "index.mode" : "standard"
+    }
+  },
+  ".ds-logs-app-default-2026.10.24-000001" : {
+    "settings" : {
+      "index.version.created" : "8537000"
+    },
+    "defaults" : {
+      "index.mode" : "standard"
+    }
+  }
+}
+
+
+[esu1] GET /_cat/snapshots/upgrade_repo?v&h=id,status,indices
+id            status indices
+before-9.5.5 SUCCESS       5
+
+
+
+======== 9.x 新增的叢集狀態加密：升級上來的節點沒有 auto-config，要自己在每台的 keystore 加密碼 ========  (2026-10-24 22:28:28)
+[esu1]# /usr/share/elasticsearch/bin/elasticsearch-keystore list
+autoconfiguration.password_hash
+keystore.seed
+
+[esu1] GET /_health_report/cluster_state_encryption?pretty
+{
+  "cluster_name" : "es-upgrade",
+  "indicators" : {
+    "cluster_state_encryption" : {
+      "status" : "green",
+      "symptom" : "Cluster state encryption is not configured.",
+      "details" : {
+        "encryption_required" : true,
+        "state" : "disabled",
+        "active_password_id" : "(unset)"
+      }
+    }
+  }
+}
+
+
+[esu1]# openssl rand -base64 32 | tr -d "\n" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.password.v1 && printf v1 | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.active_password_id && /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep cluster.state
+cluster.state.encryption.active_password_id
+cluster.state.encryption.password.v1
+
+[esu2]# openssl rand -base64 32 | tr -d "\n" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.password.v1 && printf v1 | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.active_password_id && /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep cluster.state
+cluster.state.encryption.active_password_id
+cluster.state.encryption.password.v1
+
+[esu3]# openssl rand -base64 32 | tr -d "\n" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.password.v1 && printf v1 | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.active_password_id && /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep cluster.state
+cluster.state.encryption.active_password_id
+cluster.state.encryption.password.v1
+
+[esu1] POST /_nodes/reload_secure_settings?filter_path=_nodes,nodes.*.name,nodes.*.reload_exception&pretty
+{
+  "_nodes" : {
+    "total" : 3,
+    "successful" : 3,
+    "failed" : 0
+  },
+  "nodes" : {
+    "N-xrmlphSWu6jDAmm0HCtA" : {
+      "name" : "esu1"
+    },
+    "p58d_6NgRDq-xJ7mOQ5nEg" : {
+      "name" : "esu2"
+    },
+    "UxP7q-LLRM6VqWEJcyMT-g" : {
+      "name" : "esu3"
+    }
+  }
+}
+
+
+[esu1] GET /_health_report/cluster_state_encryption?pretty
+{
+  "cluster_name" : "es-upgrade",
+  "indicators" : {
+    "cluster_state_encryption" : {
+      "status" : "green",
+      "symptom" : "Cluster state encryption is healthy.",
+      "details" : {
+        "metadata_password_id" : "v1",
+        "key_count" : 1,
+        "active_key_id" : "pq57PrpwRZOMuTFoNhAe0g",
+        "active_password_id" : "v1",
+        "encryption_required" : true,
+        "state" : "ready"
+      }
+    }
+  }
+}
+
+
+
+======== 降版測試：esu1 裝回 8.19.23 ========  (2026-10-24 22:28:33)
+[esu2] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":"primaries"}}
+{"acknowledged":true,"persistent":{"cluster":{"routing":{"allocation":{"enable":"primaries"}}}},"transient":{}}
+
+[esu1]# systemctl stop elasticsearch && for k in cluster.state.encryption.password.v1 cluster.state.encryption.active_password_id; do /usr/share/elasticsearch/bin/elasticsearch-keystore remove $k; done && cp /root/conf/elasticsearch-8.repo /etc/yum.repos.d/elasticsearch.repo && dnf downgrade -y --enablerepo=elasticsearch elasticsearch-8.19.23 2>&1 | grep -E "Downgrad|Complete|Error" | head -5; rpm -q elasticsearch
+Downgrading:
+Downgrade  1 Package
+  Downgrading      : elasticsearch-8.19.23-1.aarch64                        1/2 
+Downgraded:
+Complete!
+elasticsearch-8.19.23-1.aarch64
+
+[esu1]# systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 60 | grep -E 'ERROR|Exception|cannot|incompatible|downgrade' | cut -c1-600 | tail -6; grep -A1 'fatal exception' /var/log/elasticsearch/es-upgrade.log | grep Exception | tail -1 | cut -c1-600
+Job for elasticsearch.service failed because the control process exited with error code.
+See "systemctl status elasticsearch.service" and "journalctl -xeu elasticsearch.service" for details.
+failed
+Oct 24 14:31:04 esu1 systemd-entrypoint[5378]: ERROR: Elasticsearch did not exit normally - check the logs at /var/log/elasticsearch/es-upgrade.log
+Oct 24 14:31:04 esu1 systemd-entrypoint[5378]: ERROR: Elasticsearch died while starting up, with exit code 1
+java.lang.IllegalArgumentException: indexCreatedVersionMajor is in the future: 10
+
+[esu1]# systemctl reset-failed elasticsearch; cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -E "Upgrad|Complete" | head -3 && openssl rand -base64 32 | tr -d "\n" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.password.v1 && printf v1 | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.active_password_id && systemctl daemon-reload && systemctl start elasticsearch && rpm -q elasticsearch
+Upgrading:
+Upgrade  1 Package
+  Upgrading        : elasticsearch-9.5.5-1.aarch64                          1/2 
+elasticsearch-9.5.5-1.aarch64
+
+（esu1 重新加入：等了 0 秒）
+[esu2] PUT /_cluster/settings
+{"persistent":{"cluster.routing.allocation.enable":null}}
+{"acknowledged":true,"persistent":{},"transient":{}}
+
+（green：等了 1 秒）
+[esu2] GET /_cat/nodes?v&h=name,version,master&s=name
+name version master
+esu1 9.5.5   -
+esu2 9.5.5   -
+esu3 9.5.5   *
+
+
+[esu1]# grep -E '\]\[(WARN|ERROR)' /var/log/elasticsearch/es-upgrade.log | cut -c1-300 | sed -E 's/^\[[^]]+\]//' | sort | uniq -c | sort -rn | head -12 || echo '(none)'
+      3 [WARN ][i.o.usage                ] [esu1] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+      2 [WARN ][stderr                   ] [esu1] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+      2 [WARN ][stderr                   ] [esu1] SLF4J(W): No SLF4J providers were found.
+      2 [WARN ][stderr                   ] [esu1] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+      2 [WARN ][o.e.g.CuVSGPUSupport     ] [esu1] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+      1 [WARN ][o.e.x.i.s.e.a.ElasticInferenceServiceAuthorizationHandler] [esu1] Failed to revoke access to default inference endpoint IDs: [rainbow-sprinkles, rerank-v1, multilingual-embed-v1, elser-v2], error: org.elasticsearch.cluster.block.ClusterBlockException: blocked by: [SE
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu1] [orders][2] marking unavailable shards as stale: [TzQJ33KuT2mZugumYm-SKA]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu1] [orders][1] marking unavailable shards as stale: [id6XnjOUQMGhWD3_JlezVg]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu1] [orders][1] marking unavailable shards as stale: [MH3Y6TN7QuahDFRhVUAVVA]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu1] [orders][0] marking unavailable shards as stale: [ZMYcxzIpRreYeL_VQCg0oQ]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu1] [.ds-ilm-history-7-2026.10.24-000001][0] marking unavailable shards as stale: [TKdc1SYtTFOuy85Og1eAYQ]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu1] [.ds-.logs-deprecation.elasticsearch-default-2026.10.24-000001][0] marking unavailable shards as stale: [N3z0C0pwScKx4aMpuPNW5A]
+
+[esu2]# grep -E '\]\[(WARN|ERROR)' /var/log/elasticsearch/es-upgrade.log | cut -c1-300 | sed -E 's/^\[[^]]+\]//' | sort | uniq -c | sort -rn | head -12 || echo '(none)'
+     20 [WARN ][o.e.x.c.t.IndexTemplateRegistry] [esu2] error adding index template [logs-elasticsearch.querylog@mappings] for [stack]
+      3 [WARN ][o.e.c.c.ClusterFormationFailureHelper] [esu2] master not discovered or elected yet, an election requires at least 2 nodes with ids from [N-xrmlphSWu6jDAmm0HCtA, UxP7q-LLRM6VqWEJcyMT-g, p58d_6NgRDq-xJ7mOQ5nEg], have only discovered non-quorum [{esu2}{p58d_6NgRDq-xJ7mO
+      2 [WARN ][i.o.usage                ] [esu2] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+      1 [WARN ][stderr                   ] [esu2] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+      1 [WARN ][stderr                   ] [esu2] SLF4J(W): No SLF4J providers were found.
+      1 [WARN ][stderr                   ] [esu2] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+      1 [WARN ][o.e.x.i.s.e.a.ElasticInferenceServiceAuthorizationHandler] [esu2] Failed to revoke access to default inference endpoint IDs: [rainbow-sprinkles, rerank-v1, multilingual-embed-v1, elser-v2], error: org.elasticsearch.cluster.block.ClusterBlockException: blocked by: [SE
+      1 [WARN ][o.e.g.CuVSGPUSupport     ] [esu2] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+      1 [WARN ][o.e.c.NodeConnectionsService] [esu2] failed to connect to {esu1}{N-xrmlphSWu6jDAmm0HCtA}{enS4gKtxQaiKefMyUB9J5Q}{esu1}{192.168.60.31}{192.168.60.31:9300}{dim}{8.19.23}{7000099-8537000}{transform.config_version=10.0.0, xpack.installed=true, ml.config_version=12.0.0} (
+
+[esu3]# grep -E '\]\[(WARN|ERROR)' /var/log/elasticsearch/es-upgrade.log | cut -c1-300 | sed -E 's/^\[[^]]+\]//' | sort | uniq -c | sort -rn | head -12 || echo '(none)'
+      9 [WARN ][o.e.x.c.t.IndexTemplateRegistry] [esu3] error adding index template [logs-elasticsearch.querylog@mappings] for [stack]
+      2 [WARN ][i.o.usage                ] [esu3] OpenTelemetry API usage issue detected. To see more details, enable FINEST logging for io.opentelemetry.usage. Stacktraces are includes to identify the offending call site.
+      1 [WARN ][stderr                   ] [esu3] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+      1 [WARN ][stderr                   ] [esu3] SLF4J(W): No SLF4J providers were found.
+      1 [WARN ][stderr                   ] [esu3] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+      1 [WARN ][o.e.x.i.s.e.a.ElasticInferenceServiceAuthorizationHandler] [esu3] Failed to revoke access to default inference endpoint IDs: [rainbow-sprinkles, rerank-v1, multilingual-embed-v1, elser-v2], error: org.elasticsearch.cluster.block.ClusterBlockException: blocked by: [SE
+      1 [WARN ][o.e.g.CuVSGPUSupport     ] [esu3] GPU based vector indexing is not supported on this platform; cuvs-java supports only x86
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu3] [orders][2] marking unavailable shards as stale: [_EnC_LOhRzGsU7OY7tmGdw]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu3] [orders][0] marking unavailable shards as stale: [hNB4MkBVR9qXt1gN_ex3YA]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu3] [.security-7][0] marking unavailable shards as stale: [CYslw0SnT2yQZGtnRTngEg]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu3] [.security-7][0] marking unavailable shards as stale: [09Q1kRjuTa6fQemwS99Wsg]
+      1 [WARN ][o.e.c.r.a.AllocationService] [esu3] [.ds-ilm-history-7-2026.10.24-000001][0] marking unavailable shards as stale: [uGynEad2T5OQzyspKZHVog]
+
+[esu1]# rm -rf /mnt/es-snapshots/.dist
+

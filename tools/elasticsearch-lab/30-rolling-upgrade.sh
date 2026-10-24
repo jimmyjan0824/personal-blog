@@ -104,9 +104,10 @@ e esu1 GET '/_health_report/cluster_state_encryption?pretty'
 
 note "降版測試：esu1 裝回 8.19.23"
 e esu2 PUT /_cluster/settings '{"persistent":{"cluster.routing.allocation.enable":"primaries"}}'
-x esu1 'systemctl stop elasticsearch && cp /root/conf/elasticsearch-8.repo /etc/yum.repos.d/elasticsearch.repo && dnf downgrade -y --enablerepo=elasticsearch elasticsearch-8.19.23 2>&1 | grep -E "Downgrad|Complete|Error" | head -5; rpm -q elasticsearch'
-x esu1 "systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 60 | grep -E 'ERROR|Exception|cannot|incompatible|downgrade' | cut -c1-600 | tail -6"
-x esu1 'systemctl reset-failed elasticsearch; cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -E "Upgrad|Complete" | head -3 && systemctl daemon-reload && systemctl start elasticsearch && rpm -q elasticsearch'
+# 8.19 不認得 9.x 的 secure setting（cluster.state.encryption.*），留著的話 8.19 會先因 unknown secure setting 失敗、看不到真正的降版錯誤；先從 keystore 移除
+x esu1 'systemctl stop elasticsearch && for k in cluster.state.encryption.password.v1 cluster.state.encryption.active_password_id; do /usr/share/elasticsearch/bin/elasticsearch-keystore remove $k; done && cp /root/conf/elasticsearch-8.repo /etc/yum.repos.d/elasticsearch.repo && dnf downgrade -y --enablerepo=elasticsearch elasticsearch-8.19.23 2>&1 | grep -E "Downgrad|Complete|Error" | head -5; rpm -q elasticsearch'
+x esu1 "systemctl start elasticsearch; systemctl is-active elasticsearch; journalctl -u elasticsearch --no-pager -n 60 | grep -E 'ERROR|Exception|cannot|incompatible|downgrade' | cut -c1-600 | tail -6; grep -A1 'fatal exception' $LOG | grep Exception | tail -1 | cut -c1-600"
+x esu1 'systemctl reset-failed elasticsearch; cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && dnf install -y --enablerepo=elasticsearch elasticsearch-9.5.5 2>&1 | grep -E "Upgrad|Complete" | head -3 && openssl rand -base64 32 | tr -d "\n" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.password.v1 && printf v1 | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x -f cluster.state.encryption.active_password_id && systemctl daemon-reload && systemctl start elasticsearch && rpm -q elasticsearch'
 wait_until "esu1 重新加入" 180 "nodes_seen esu2 | grep -q esu1"
 e esu2 PUT /_cluster/settings '{"persistent":{"cluster.routing.allocation.enable":null}}'
 wait_until "green" 180 "[ \"\$(health esu2)\" = green ]"
