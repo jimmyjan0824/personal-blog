@@ -225,3 +225,67 @@ B-3 network cut of the follower cluster (esd9 disconnected, leader wrote 50k doc
 
 Memory: no OOM kills or container restarts in any phase-2 script (max 4 ES nodes x 1g heap in the 7.7 GiB VM).
 Cleanup: docker compose down -v at the end; images eslab-rocky9-{base,es8,es9} kept.
+
+==========================================================================================
+Kibana 9.5.5 — 50-kibana.sh, run 2026-10-25 on the same Mac (kb1 192.168.60.51 + es-prod esc1~esc3)
+==========================================================================================
+conf/kibana.yml fixes (verified against the 9.5.5 schema on kb1; per-key defaults in results/kibana-defaults-check.txt)
+K1. elasticsearch.maxSockets: Infinity -> Kibana refused to start:
+      FATAL Error: [config validation of [elasticsearch].maxSockets]: expected value of type [number] but got [string]
+    (YAML reads Infinity as a string). Real 9.5.5 default is 800 (schema.number, min 1) -> set to 800, tag 預設.
+    This was the only key that blocked startup.
+K2. elasticsearch.pingTimeout REMOVED: Kibana logs
+      Setting "elasticsearch.pingTimeout" is deprecated and no longer used. Use "elasticsearch.requestTimeout" instead.
+K3. i18n.locale -> i18n.defaultLocale: Kibana logs  Setting "i18n.locale" has been replaced by "i18n.defaultLocale"
+    (renameFromRoot, level warning); default 'en'; locales en, fr-FR, ja-JP, zh-CN, de-DE.
+K4. server.ssl.supportedProtocols 建議 -> 預設: the 9.5.5 default already is [TLSv1.2, TLSv1.3] (old comment said TLSv1.1
+    was in the default).
+K5. xpack.security.session.idleTimeout 預設 -> 建議 (預設 3d): real default 3d, 8h kept as the recommendation.
+K6. xpack.task_manager.poll_interval 3000 -> 500 (預設): 9.5.5 default claim_strategy is mget, whose poll_interval
+    default is 500; 3000 only applies to update_by_query. /api/task_manager/_health confirms claim_strategy mget,
+    poll_interval 500, capacity {config 10, as_workers 10, as_cost 20}.
+K7. xpack.reporting.csv.scroll.duration "30s" -> "120s" (real default).
+K8. xpack.alerting.rules.minimumScheduleInterval.value: default 1m confirmed, comment corrected — enforce defaults to
+    false, so shorter rules are only warned about, not blocked.
+After the fixes: no config deprecation warnings at startup.
+
+50-kibana.sh fixes
+S1. Kibana encryption keys printed by kibana-encryption-keys are masked in the log (keystore still gets the real values).
+S2. TLS version check: Rocky 9's DEFAULT crypto policy makes the openssl CLIENT refuse TLS 1.1 ("no protocols
+    available"), and the old grep matched a bogus "Protocol: TLSv1.3" line, so every version printed "ok". Now uses
+    -cipher 'DEFAULT:@SECLEVEL=0' and treats "Cipher is (NONE)" as rejected. Result: TLSv1.1 rejected by the SERVER
+    ("tlsv1 alert protocol version", alert 70), TLSv1.2 ok, TLSv1.3 ok, HTTP/2 negotiated.
+S3. /api/console/proxy returned 400 "uri [/api/console/proxy] with method [post] exists but is not available with
+    the current configuration" — 9.x restricts internal APIs for external callers. k()/kcount() now send
+    `x-elastic-internal-origin: kibana`. (Run 2's test 6 "_count=null" readings were caused by this.)
+S4. Test 7 grep now reads only this restart's FATAL (it used to pick up older ConnectionError lines).
+S5. 8.19.23 part: FATAL read with --since; plus one extra step that switches i18n.defaultLocale back to the 8.x name
+    i18n.locale and starts again to show the next blocker. Defaults table notes that fuzzy plugin matches may hit a
+    different plugin (newsfeed.enabled matched agent-builder) — kibana-defaults-check.txt is the authoritative list.
+Runs: 3 (run 1 stopped at the K1 FATAL; run 2 found S2-S5; run 3 = committed clean log, 10m39s total incl. setup).
+
+Results (run 3; run 2 numbers in brackets)
+- Kibana 9.5.5 RPM: installed size 1487 MB; bundled Node v24.21.0, Node default heap limit 2240 MB; lab sets
+  --max-old-space-size=1024 (article: 2048) -> /api/status heap size_limit 1275068416.
+  Download speed varied: run 1 install ~1m40s, run 2 ~10 min (~5.5 MB/s).
+- First start (fresh cluster, creates .kibana* indices) to overall=available: 16 s [15 s]. 12 system indices + 17
+  aliases created (.kibana_9.5.5_001, .kibana_task_manager_9.5.5_001, .kibana_security_session_1, ...).
+- systemctl restart to available: 16 s [15 s].
+- unauthenticated GET /api/status -> HTTP 200 with only {"status":{"overall":{"level":"available"}}} (redacted), not 401.
+- Elasticsearch failover: esc1 (first in elasticsearch.hosts) stopped -> overall stays available, queries through
+  Kibana keep working (orders/_count=50000, 207-442 ms each, 6 samples over 30 s).
+- All 3 ES nodes stopped -> /api/status overall "critical", HTTP 503, Kibana process stays active. After the ES
+  nodes are started again: back to available in 41 s [22 s] (incl. cluster formation).
+- Misspelled key test: elasticsearch.requestTimout ->
+    FATAL Error: [config validation of [elasticsearch].requestTimout]: Additional properties are not allowed ('requestTimout' was unexpected)
+  (a nonexistent key inside a known plugin block gives this wording; a key whose plugin/path doesn't exist gives
+  "definition for this key is missing"). systemd keeps restarting it every ~6 s until the file is fixed.
+- Defaults: bin/kibana-defaults.js extracted 811 key|default lines (results/kibana-defaults-9.5.5.txt); keys without
+  a direct hit (xpack.*, path.data, pid.file, logging) were checked by grep in the source on kb1.
+- Kibana 8.19.23 with the same kibana.yml (ES still 9.5.5), `dnf downgrade` keeps kibana.yml (writes .rpmnew):
+    1) FATAL Error: [config validation of [i18n].defaultLocale]: definition for this key is missing
+    2) after renaming it back to i18n.locale:
+       FATAL Reason: Unable to complete saved object migrations for the [.kibana_task_manager] index:
+       The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5
+  -> once 9.5.5 has migrated the .kibana* indices there is no going back to 8.x Kibana without restoring them.
+- Cleanup: docker compose down -v at the end; images kept.

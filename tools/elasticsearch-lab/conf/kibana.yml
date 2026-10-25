@@ -42,7 +42,7 @@ server.ssl.enabled: true
 server.ssl.certificate: /etc/kibana/certs/kb1.crt
 # 必要
 server.ssl.key: /etc/kibana/certs/kb1.key
-# 建議（預設 [TLSv1.1, TLSv1.2, TLSv1.3]）。不接受 TLS 1.1
+# 預設。9.x 預設就只接受 TLS 1.2 / 1.3（TLS 1 / 1.1 要明確加進來才會接受）
 server.ssl.supportedProtocols: [ "TLSv1.2", "TLSv1.3" ]
 
 #------------------------------------------------------------------------------
@@ -58,14 +58,12 @@ elasticsearch.ssl.certificateAuthorities: [ "/etc/kibana/certs/ca.crt" ]
 elasticsearch.ssl.verificationMode: full
 # 預設（毫秒）。Kibana 等 Elasticsearch 回應的上限；大範圍的儀表板查詢超過就顯示逾時。要調大時先查慢的是哪個查詢
 elasticsearch.requestTimeout: 30000
-# 預設（= requestTimeout）。ping 的逾時
-elasticsearch.pingTimeout: 30000
 # 預設（毫秒）。每個分片的查詢逾時（送給 Elasticsearch 的 timeout 參數），0 = 不限
 elasticsearch.shardTimeout: 30000
 # 預設（毫秒）。啟動時檢查 Elasticsearch 版本相容性的間隔
 elasticsearch.healthCheck.delay: 2500
-# 預設（Infinity）。對每個 Elasticsearch 節點最多開幾條 socket
-elasticsearch.maxSockets: Infinity
+# 預設。對每個 Elasticsearch 節點最多開幾條 socket（8.x 起預設 800；舊文件寫的 Infinity 在 9.5 會因型別錯誤拒絕啟動）
+elasticsearch.maxSockets: 800
 # 預設。最多保留幾條閒置 socket
 elasticsearch.maxIdleSockets: 256
 # 預設。閒置 socket 多久後關閉
@@ -93,7 +91,7 @@ savedObjects.maxImportExportSize: 10000
 #------------------------------------------------------------------------------
 # 登入工作階段
 #------------------------------------------------------------------------------
-# 預設。閒置多久後要重新登入
+# 建議（預設 3d）。閒置多久後要重新登入；預設 3 天對共用電腦太長，改成一個工作天
 xpack.security.session.idleTimeout: "8h"
 # 預設。不論是否閒置，登入後最長多久要重新登入
 xpack.security.session.lifespan: "30d"
@@ -105,9 +103,10 @@ xpack.security.session.cleanupInterval: "1h"
 #------------------------------------------------------------------------------
 # 預設。每台 Kibana 同時執行的工作量上限；規則很多、/api/task_manager/_health 顯示積壓時才調大（或加一台 Kibana）
 xpack.task_manager.capacity: 10
-# 預設（毫秒）。多久向 .kibana_task_manager 索引領一次工作
-xpack.task_manager.poll_interval: 3000
-# 預設。告警規則最短的執行間隔，避免有人建立每秒執行的規則壓垮 Elasticsearch
+# 預設（毫秒）。多久向 .kibana_task_manager 索引領一次工作；9.x 的預設領取方式 claim_strategy: mget 搭配 500，
+# 舊版（update_by_query）才是 3000，照舊文章改成 3000 會讓排程工作延遲
+xpack.task_manager.poll_interval: 500
+# 預設。告警規則最短的執行間隔；enforce 預設 false，比這更短的規則只會出現警告、仍可建立，要強制擋下需另設 enforce: true
 xpack.alerting.rules.minimumScheduleInterval.value: "1m"
 
 #------------------------------------------------------------------------------
@@ -118,7 +117,7 @@ xpack.reporting.csv.maxSizeBytes: 262144000
 # 預設。CSV 匯出時每批向 Elasticsearch 取幾筆
 xpack.reporting.csv.scroll.size: 500
 # 預設。每批 scroll / point-in-time 的保留時間
-xpack.reporting.csv.scroll.duration: "30s"
+xpack.reporting.csv.scroll.duration: "120s"
 # 預設。一個報表工作的執行上限
 xpack.reporting.queue.timeout: "4m"
 
@@ -142,7 +141,7 @@ telemetry.allowChangingOptInStatus: false
 # 建議（預設 true）。不從外部網站抓新聞（內網連不出去時，畫面會一直等）
 newsfeed.enabled: false
 # 預設。介面語言（內建 en、zh-CN、ja-JP、fr-FR、de-DE，沒有繁體中文）
-i18n.locale: "en"
+i18n.defaultLocale: "en"
 # 必要（RPM 預設）
 path.data: /var/lib/kibana
 # 必要（RPM 預設）

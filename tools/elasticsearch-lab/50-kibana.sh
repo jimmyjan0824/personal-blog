@@ -8,10 +8,12 @@ LOG=/var/log/elasticsearch/es-prod.log
 KB_PW=ChangeMe_Kibana_2026
 ip() { case $1 in esc1) echo 192.168.60.21;; esc2) echo 192.168.60.22;; esc3) echo 192.168.60.23;; esac; }
 # Kibana REST API：k <METHOD> <路徑> [body] [jq 篩選]，印成「[kb1] GET /路徑」（elastic 帳號、驗證 CA 憑證、kbn-xsrf 標頭）
+# 9.x 預設擋外部呼叫 internal API（例如 /api/console/proxy 回 400 "not available with the current configuration"），
+# 要帶 x-elastic-internal-origin: kibana 標頭（Kibana 自己的前端就是這樣呼叫）
 k() {
   local m=$1 p=$2 b=${3:-} f=${4:-}
   echo "[kb1] $m $p"; [ -n "$b" ] && echo "$b"; [ -n "$f" ] && echo "（jq：$f）"
-  local C="curl -sS --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X $m 'https://kb1:5601$p'"
+  local C="curl -sS --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' -H 'kbn-xsrf: true' -H 'x-elastic-internal-origin: kibana' -H 'Content-Type: application/json' -X $m 'https://kb1:5601$p'"
   local out
   if [ -n "$b" ]; then out=$(printf '%s' "$b" | docker compose exec -T kb1 bash -c "$C --data-binary @-" 2>&1)
   else out=$(docker compose exec -T kb1 bash -c "$C" 2>&1); fi
@@ -19,7 +21,7 @@ k() {
   echo
 }
 kq() { docker compose exec -T kb1 bash -c "curl -sS --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' https://kb1:5601$1" 2>/dev/null; }
-kcount() { docker compose exec -T kb1 bash -c "curl -sS --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' -H 'kbn-xsrf: true' -X POST 'https://kb1:5601/api/console/proxy?path=%2Forders%2F_count&method=GET'" 2>/dev/null | jq -r .count 2>/dev/null; }
+kcount() { docker compose exec -T kb1 bash -c "curl -sS --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' -H 'kbn-xsrf: true' -H 'x-elastic-internal-origin: kibana' -X POST 'https://kb1:5601/api/console/proxy?path=%2Forders%2F_count&method=GET'" 2>/dev/null | jq -r .count 2>/dev/null; }
 ms() { perl -MTime::HiRes=time -e 'printf "%d", time*1000'; }   # macOS 的 date 沒有 %N
 kb_level() { kq /api/status | jq -r .status.overall.level 2>/dev/null; }
 {
@@ -61,7 +63,7 @@ x kb1 'mkdir -p /etc/kibana/certs && install -o root -g kibana -m 640 /mnt/es-sn
 x kb1 'cp /etc/kibana/kibana.yml /etc/kibana/kibana.yml.rpm && install -o root -g kibana -m 660 /root/conf/kibana.yml /etc/kibana/kibana.yml && ls -l /etc/kibana/kibana.yml'
 x kb1 'cd /usr/share/kibana && ls -l /etc/kibana/kibana.keystore 2>/dev/null || bin/kibana-keystore create; bin/kibana-keystore list'
 x kb1 "cd /usr/share/kibana && echo '$KB_PW' | bin/kibana-keystore add elasticsearch.password --stdin && bin/kibana-keystore list"
-x kb1 'cd /usr/share/kibana && bin/kibana-encryption-keys generate -q 2>&1 | tee /root/kb-keys.txt'
+x kb1 'cd /usr/share/kibana && bin/kibana-encryption-keys generate -q 2>&1 | tee /root/kb-keys.txt | sed -E "s/(: )[0-9a-f]{16,}/\1<隨機 64 字元，輸出省略>/"'
 x kb1 'cd /usr/share/kibana && grep -E "^xpack\.[a-zA-Z.]+encryptionKey: " /root/kb-keys.txt | while IFS=": " read -r key val; do echo "$val" | tr -d "\r" | bin/kibana-keystore add "$key" --stdin -x >/dev/null && echo "added $key"; done; bin/kibana-keystore list; ls -l /etc/kibana/kibana.keystore; rm -f /root/kb-keys.txt'
 # 實測環境：Docker VM 記憶體有限，heap 上限改成 1 GB（文章的設定是 2048）
 x kb1 'grep -vE "^\s*#" /root/conf/kibana-node.options | sed "s/=2048/=1024/" | { echo; echo "# 實測環境（Docker VM 記憶體有限），文章的設定是 2048"; cat; } >> /etc/kibana/node.options && cat /etc/kibana/node.options'
@@ -81,9 +83,9 @@ k GET /api/status '' '{name, version: .version.number, overall: .status.overall,
 k GET /api/status '' '.metrics | {last_updated, collection_interval_in_millis, process: {memory: .process.memory.heap, event_loop_delay: .process.event_loop_delay, uptime_ms: .process.uptime_in_millis}, os_load: .os.load, requests: .requests, response_times: .response_times, concurrent_connections}'
 k GET /api/status '' '[.status.plugins | to_entries[] | select(.value.level != "available") | {plugin: .key, level: .value.level, summary: .value.summary}] | .[:15]'
 echo "# 不帶帳號（status.allowAnonymous 預設 false）"
-x kb1 "curl -sS -o /dev/null -w '%{http_code}\n' --cacert /etc/kibana/certs/ca.crt https://kb1:5601/api/status"
+x kb1 "curl -sS -w '\nHTTP %{http_code}\n' --cacert /etc/kibana/certs/ca.crt https://kb1:5601/api/status | cut -c1-300"
 echo "# HTTP/2 與 TLS 版本"
-x kb1 "curl -sS -o /dev/null -w 'http_version=%{http_version}\n' --http2 --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' https://kb1:5601/api/status; for v in 1.1 1.2 1.3; do printf 'TLSv%s: ' \$v; openssl s_client -connect kb1:5601 -CAfile /etc/kibana/certs/ca.crt -tls\${v/./_} </dev/null 2>&1 | grep -qE '^ *Protocol *: TLSv' && echo ok || echo rejected; done"
+x kb1 "curl -sS -o /dev/null -w 'http_version=%{http_version}\n' --http2 --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' https://kb1:5601/api/status; for v in 1.1 1.2 1.3; do printf 'TLSv%s: ' \$v; openssl s_client -connect kb1:5601 -CAfile /etc/kibana/certs/ca.crt -tls\${v/./_} -cipher 'DEFAULT:@SECLEVEL=0' </dev/null 2>&1 | grep -q 'Cipher is (NONE)' && echo rejected || echo ok; done"
 x kb1 "curl -sS -o /dev/null -D - --compressed --cacert /etc/kibana/certs/ca.crt -u 'elastic:$ES_PW' https://kb1:5601/login | grep -iE '^(HTTP|content-encoding|content-security)' | cut -c1-120"
 
 note "測試 2：Kibana 在 Elasticsearch 上建立的系統索引與連線"
@@ -128,14 +130,15 @@ wait_until "Kibana available" 300 "[ \"\$(kb_level)\" = available ]"
 echo "Elasticsearch 重新啟動後 Kibana 恢復 available：$(( $(date +%s)-T0 )) 秒（含叢集組成）"
 
 note "測試 7：拼錯參數（elasticsearch.requestTimout），Kibana 拒絕啟動"
-x kb1 'cp /etc/kibana/kibana.yml /root/kibana.yml.bak && echo "elasticsearch.requestTimout: 60000" >> /etc/kibana/kibana.yml && systemctl restart kibana; sleep 20; systemctl is-active kibana; journalctl -u kibana --no-pager -n 200 | grep -E "FATAL|Error:|definition for this key" | cut -c1-300 | head -5'
+x kb1 'cp /etc/kibana/kibana.yml /root/kibana.yml.bak && echo "elasticsearch.requestTimout: 60000" >> /etc/kibana/kibana.yml && systemctl restart kibana; sleep 20; systemctl is-active kibana; journalctl -u kibana --no-pager --since -25s | grep -E "FATAL" | cut -c1-300 | head -3'
 x kb1 'cp /root/kibana.yml.bak /etc/kibana/kibana.yml && systemctl reset-failed kibana; systemctl restart kibana && echo restarted'
 wait_until "Kibana available" 300 "[ \"\$(kb_level)\" = available ]"
 
 note "預設值核對：載入 9.5.5 安裝目錄裡的設定 schema，對空物件 validate 取預設值（bin/kibana-defaults.js）"
 x kb1 'f=$(ls /usr/share/kibana/node/*/bin/node /usr/share/kibana/node/bin/node 2>/dev/null | head -1); cd /tmp && timeout 600 $f /root/bin/kibana-defaults.js /usr/share/kibana > /tmp/kb-defaults.txt 2>/dev/null; wc -l < /tmp/kb-defaults.txt; mkdir -p /mnt/es-snapshots/.dist && cp /tmp/kb-defaults.txt /mnt/es-snapshots/.dist/kibana-defaults-9.5.5.txt'
 docker compose exec -T kb1 cat /mnt/es-snapshots/.dist/kibana-defaults-9.5.5.txt > results/kibana-defaults-9.5.5.txt 2>/dev/null
-echo "# kibana.yml 裡每個參數在 schema 預設值裡的對應（找不到的印 NOT FOUND）"
+echo "# kibana.yml 裡每個參數在 schema 預設值裡的對應（找不到的印 NOT FOUND；「以 xx 比對」是外掛 schema 的模糊比對，可能對到別的外掛）"
+echo "# 逐一以原始碼核對過的結果在 results/kibana-defaults-check.txt"
 grep -E '^[a-zA-Z][a-zA-Z0-9_.]+:' conf/kibana.yml | cut -d: -f1 | while read -r key; do
   hit=$(grep -E "^\??[^|]*\b${key//./\\.}\|" results/kibana-defaults-9.5.5.txt | head -1)
   [ -z "$hit" ] && { tail=${key#*.}; hit=$(grep -E "^\?[^|]*\.${tail//./\\.}\|" results/kibana-defaults-9.5.5.txt | head -1); [ -n "$hit" ] && hit="（以 $tail 比對）$hit"; }
@@ -144,6 +147,8 @@ done
 
 note "對照：同一份 kibana.yml 放到 Kibana 8.19.23（Elasticsearch 仍是 9.5.5）"
 x kb1 'systemctl stop kibana && cp /root/conf/elasticsearch-8.repo /etc/yum.repos.d/elasticsearch.repo && dnf downgrade -y -q --enablerepo=elasticsearch kibana-8.19.23 2>&1 | tail -3; rpm -q kibana; ls /etc/kibana; diff -q /root/conf/kibana.yml /etc/kibana/kibana.yml && echo "kibana.yml 保留"'
-x kb1 'systemctl start kibana; sleep 60; systemctl is-active kibana; journalctl -u kibana --no-pager -n 300 | grep -E "FATAL|Error:|definition for this key|incompatible|newer" | cut -c1-400 | head -8; grep -E "\"level\":\"(ERROR|FATAL)\"" /var/log/kibana/kibana.log | tail -3 | grep -oE "\"message\":\"[^\"]{0,400}"'
+x kb1 'S=$(date "+%F %T"); systemctl start kibana; sleep 60; systemctl is-active kibana; journalctl -u kibana --no-pager --since "$S" | grep -E "FATAL" | cut -c1-400 | head -3'
+echo "# 8.x 沒有 i18n.defaultLocale（9.x 由 i18n.locale 改名而來）；換回 8.x 的名稱再啟動一次，看下一個擋住的原因"
+x kb1 'sed -i "s/^i18n.defaultLocale:/i18n.locale:/" /etc/kibana/kibana.yml && grep -n "^i18n" /etc/kibana/kibana.yml; systemctl reset-failed kibana; S=$(date "+%F %T"); systemctl start kibana; sleep 60; systemctl is-active kibana; journalctl -u kibana --no-pager --since "$S" | grep -E "FATAL" | cut -c1-400 | head -3; grep -E "\"level\":\"(ERROR|FATAL)\"" /var/log/kibana/kibana.log | tail -3 | grep -oE "\"message\":\"[^\"]{0,400}"'
 x esc1 'rm -rf /mnt/es-snapshots/.dist'
 } 2>&1 | tee results/50-kibana.log

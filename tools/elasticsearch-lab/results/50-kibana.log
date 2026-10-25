@@ -1,0 +1,758 @@
+
+======== 建置 es-prod（esc1~esc3），步驟同 20-cluster.sh；instances.yml 多了 kb1，CA 一起簽發 Kibana 的憑證 ========  (2026-10-25 14:10:50)
+ Network elasticsearch-lab_labnet Creating 
+ Volume elasticsearch-lab_snap Creating 
+ Volume elasticsearch-lab_snap Creating 
+ Network elasticsearch-lab_labnet Creating 
+ Volume elasticsearch-lab_snap Created 
+ Volume elasticsearch-lab_snap Created 
+ Network elasticsearch-lab_labnet Created 
+ Network elasticsearch-lab_labnet Created 
+ Container elasticsearch-lab-kb1-1 Creating 
+ Container elasticsearch-lab-esc3-1 Creating 
+ Container elasticsearch-lab-esc2-1 Creating 
+ Container elasticsearch-lab-esc1-1 Creating 
+ Container elasticsearch-lab-esc3-1 Created 
+ Container elasticsearch-lab-esc1-1 Created 
+ Container elasticsearch-lab-kb1-1 Created 
+ Container elasticsearch-lab-esc2-1 Created 
+ Container elasticsearch-lab-kb1-1 Starting 
+ Container elasticsearch-lab-esc3-1 Starting 
+ Container elasticsearch-lab-esc2-1 Starting 
+ Container elasticsearch-lab-esc1-1 Starting 
+ Container elasticsearch-lab-kb1-1 Started 
+ Container elasticsearch-lab-esc3-1 Started 
+ Container elasticsearch-lab-esc2-1 Started 
+ Container elasticsearch-lab-esc1-1 Started 
+（es-prod 組成：等了 18 秒）
+（esc1 active：等了 0 秒）
+（esc2 active：等了 0 秒）
+（esc3 active：等了 0 秒）
+{}
+[esc1] GET /_cat/nodes?v&h=name,version,node.role,master
+name version node.role master
+esc2 9.5.5   dim       *
+esc1 9.5.5   dim       -
+esc3 9.5.5   dim       -
+
+
+[esc1] PUT /_component_template/base-settings
+（body：/root/conf/index-template.yaml）
+---
+acknowledged: true
+
+
+[esc1] PUT /_index_template/apps
+{"index_patterns":["orders*","app-*"],"composed_of":["base-settings"],"priority":200,"version":1}
+{"acknowledged":true}
+
+[esc1] PUT /orders
+{"settings":{"index.number_of_shards":3},"mappings":{"dynamic":"strict","properties":{"order_id":{"type":"keyword"},"customer_id":{"type":"keyword"},"status":{"type":"keyword"},"amount":{"type":"scaled_float","scaling_factor":100},"region":{"type":"keyword"},"product":{"type":"keyword"},"qty":{"type":"integer"},"created_at":{"type":"date"},"note":{"type":"text"}}}}
+{"acknowledged":true,"shards_acknowledged":true,"index":"orders"}
+
+[esc1]# /root/bin/gen-orders.sh 50000 1 > /tmp/o1.ndjson; ES_PW=ChangeMe_Elastic_2026 /root/bin/bulk-load.sh esc1 orders /tmp/o1.ndjson 5000
+docs=50000 batches=10 failed=0 seconds=2.5 docs/s=20144
+
+
+======== 步驟 1：kb1 安裝 Kibana 9.5.5（同一個 Elastic 套件庫，套件名稱 kibana） ========  (2026-10-25 14:11:29)
+[kb1]# cat /etc/os-release | grep PRETTY; free -m | head -2; nproc
+PRETTY_NAME="Rocky Linux 9.8 (Blue Onyx)"
+               total        used        free      shared  buff/cache   available
+Mem:            7934        5805        1382          32        1099        2128
+10
+
+[kb1]# rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch && cp /root/conf/elasticsearch.repo /etc/yum.repos.d/elasticsearch.repo && dnf install -y -q --enablerepo=elasticsearch kibana-9.5.5 2>&1 | tail -5; rpm -q kibana
+
+Installed:
+  kibana-9.5.5-1.aarch64                                                        
+
+kibana-9.5.5-1.aarch64
+
+[kb1]# rpm -qi kibana | grep -E "^(Version|Release|Architecture|Size)"; du -sh /usr/share/kibana; ls /usr/share/kibana; ls /usr/share/kibana/bin
+Version     : 9.5.5
+Release     : 1
+Architecture: aarch64
+Size        : 1487238393
+1.8G	/usr/share/kibana
+LICENSE.txt
+NOTICE.txt
+README.txt
+bin
+node
+node_modules
+package.json
+plugins
+x-pack
+kibana
+kibana-encryption-keys
+kibana-health-gateway
+kibana-keystore
+kibana-plugin
+kibana-setup
+kibana-verification-code
+
+[kb1]# ls -la /etc/kibana /var/lib/kibana /var/log/kibana; id kibana
+/etc/kibana:
+total 28
+drwxr-s--- 2 root kibana 4096 Oct 25 06:13 .
+drwxr-xr-x 1 root root   4096 Oct 25 06:13 ..
+-rw-rw---- 1 root kibana  130 Oct 25 06:13 kibana.keystore
+-rw-rw---- 1 root kibana 8076 Sep 30 12:18 kibana.yml
+-rw-rw-r-- 1 root kibana  384 Sep 30 12:18 node.options
+
+/var/lib/kibana:
+total 12
+drwxr-s--- 2 kibana kibana 4096 Sep 30 12:23 .
+drwxr-xr-x 1 root   root   4096 Oct 25 06:13 ..
+
+/var/log/kibana:
+total 12
+drwxr-s--- 2 kibana kibana 4096 Sep 30 12:23 .
+drwxr-xr-x 1 root   root   4096 Oct 25 06:13 ..
+uid=998(kibana) gid=998(kibana) groups=998(kibana)
+
+[kb1]# systemctl cat kibana | grep -vE "^\s*$"
+# /usr/lib/systemd/system/kibana.service
+[Unit]
+Description=Kibana
+Documentation=https://www.elastic.co
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=simple
+User=kibana
+Group=kibana
+PrivateTmp=true
+Environment=KBN_HOME=/usr/share/kibana
+Environment=KBN_PATH_CONF=/etc/kibana
+EnvironmentFile=-/etc/default/kibana
+EnvironmentFile=-/etc/sysconfig/kibana
+ExecStart=/usr/share/kibana/bin/kibana
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=3
+StartLimitInterval=60
+WorkingDirectory=/usr/share/kibana
+StandardOutput=journal
+StandardError=inherit
+[Install]
+WantedBy=multi-user.target
+
+[kb1]# cat /etc/default/kibana 2>/dev/null || cat /etc/sysconfig/kibana 2>/dev/null
+user="kibana"
+group="kibana"
+
+KBN_PATH_CONF="/etc/kibana"
+RESTART_ON_UPGRADE="true"
+
+NODE_OPTIONS_HEAPSNAPSHOT_DEFAULT="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/var/lib/kibana"
+# RPM 原本的 kibana.yml（只列沒有註解的行）
+[kb1]# grep -vE "^\s*(#|$)" /etc/kibana/kibana.yml
+logging:
+  appenders:
+    file:
+      type: file
+      fileName: /var/log/kibana/kibana.log
+      layout:
+        type: json
+  root:
+    appenders:
+      - default
+      - file
+pid.file: /run/kibana/kibana.pid
+
+# RPM 原本的 node.options
+[kb1]# cat /etc/kibana/node.options
+## Node command line options
+## See `node --help` and `node --v8-options` for available options
+## Please note you should specify one option per line
+
+## max size of old space in megabytes
+#--max-old-space-size=4096
+
+## do not terminate process on unhandled promise rejection
+ --unhandled-rejections=warn
+
+## restore < Node 16 default DNS lookup behavior
+--dns-result-order=ipv4first
+
+[kb1]# ls /usr/share/kibana/node; f=$(ls /usr/share/kibana/node/*/bin/node /usr/share/kibana/node/bin/node 2>/dev/null | head -1); echo $f; $f --version; $f -e "console.log(Math.round(require(\"v8\").getHeapStatistics().heap_size_limit/1048576)+\" MB（Node.js 預設 heap 上限）\")"
+default
+glibc-217
+/usr/share/kibana/node/default/bin/node
+v24.21.0
+2240 MB（Node.js 預設 heap 上限）
+
+
+======== 步驟 2：kibana_system 帳號的密碼（在 Elasticsearch 上設定） ========  (2026-10-25 14:13:56)
+[esc1] POST /_security/user/kibana_system/_password
+{"password":"ChangeMe_Kibana_2026"}
+{}
+
+[esc1] GET /_security/user/kibana_system?filter_path=*.roles,*.metadata,*.enabled
+{"kibana_system":{"roles":["kibana_system"],"metadata":{"_reserved":true},"enabled":true}}
+
+
+======== 步驟 3：憑證、kibana.yml、keystore、加密金鑰、heap ========  (2026-10-25 14:13:56)
+[kb1]# mkdir -p /etc/kibana/certs && install -o root -g kibana -m 640 /mnt/es-snapshots/.dist/es-certs/kb1/kb1.crt /etc/kibana/certs/kb1.crt && install -o root -g kibana -m 640 /mnt/es-snapshots/.dist/es-certs/kb1/kb1.key /etc/kibana/certs/kb1.key && install -o root -g kibana -m 644 /mnt/es-snapshots/.dist/ca/ca.crt /etc/kibana/certs/ca.crt && ls -l /etc/kibana/certs && openssl x509 -in /etc/kibana/certs/kb1.crt -noout -subject -ext subjectAltName
+total 12
+-rw-r--r-- 1 root kibana 1224 Oct 25 06:13 ca.crt
+-rw-r----- 1 root kibana 1192 Oct 25 06:13 kb1.crt
+-rw-r----- 1 root kibana 1675 Oct 25 06:13 kb1.key
+subject=CN=kb1
+X509v3 Subject Alternative Name: 
+    DNS:kb1, DNS:kb1.lab.local, IP Address:192.168.60.51
+
+[kb1]# cp /etc/kibana/kibana.yml /etc/kibana/kibana.yml.rpm && install -o root -g kibana -m 660 /root/conf/kibana.yml /etc/kibana/kibana.yml && ls -l /etc/kibana/kibana.yml
+-rw-rw---- 1 root kibana 10020 Oct 25 06:13 /etc/kibana/kibana.yml
+
+[kb1]# cd /usr/share/kibana && ls -l /etc/kibana/kibana.keystore 2>/dev/null || bin/kibana-keystore create; bin/kibana-keystore list
+-rw-rw---- 1 root kibana 130 Oct 25 06:13 /etc/kibana/kibana.keystore
+
+
+[kb1]# cd /usr/share/kibana && echo 'ChangeMe_Kibana_2026' | bin/kibana-keystore add elasticsearch.password --stdin && bin/kibana-keystore list
+elasticsearch.password
+
+[kb1]# cd /usr/share/kibana && bin/kibana-encryption-keys generate -q 2>&1 | tee /root/kb-keys.txt | sed -E "s/(: )[0-9a-f]{16,}/\1<隨機 64 字元，輸出省略>/"
+xpack.encryptedSavedObjects.encryptionKey: <隨機 64 字元，輸出省略>
+xpack.reporting.encryptionKey: <隨機 64 字元，輸出省略>
+xpack.security.encryptionKey: <隨機 64 字元，輸出省略>
+
+
+[kb1]# cd /usr/share/kibana && grep -E "^xpack\.[a-zA-Z.]+encryptionKey: " /root/kb-keys.txt | while IFS=": " read -r key val; do echo "$val" | tr -d "\r" | bin/kibana-keystore add "$key" --stdin -x >/dev/null && echo "added $key"; done; bin/kibana-keystore list; ls -l /etc/kibana/kibana.keystore; rm -f /root/kb-keys.txt
+added xpack.encryptedSavedObjects.encryptionKey
+added xpack.reporting.encryptionKey
+added xpack.security.encryptionKey
+elasticsearch.password
+xpack.encryptedSavedObjects.encryptionKey
+xpack.reporting.encryptionKey
+xpack.security.encryptionKey
+-rw-rw---- 1 root kibana 602 Oct 25 06:13 /etc/kibana/kibana.keystore
+
+[kb1]# grep -vE "^\s*#" /root/conf/kibana-node.options | sed "s/=2048/=1024/" | { echo; echo "# 實測環境（Docker VM 記憶體有限），文章的設定是 2048"; cat; } >> /etc/kibana/node.options && cat /etc/kibana/node.options
+## Node command line options
+## See `node --help` and `node --v8-options` for available options
+## Please note you should specify one option per line
+
+## max size of old space in megabytes
+#--max-old-space-size=4096
+
+## do not terminate process on unhandled promise rejection
+ --unhandled-rejections=warn
+
+## restore < Node 16 default DNS lookup behavior
+--dns-result-order=ipv4first
+
+# 實測環境（Docker VM 記憶體有限），文章的設定是 2048
+--max-old-space-size=1024
+
+
+======== 步驟 4：啟動 Kibana（第一次啟動會建立 .kibana* 系統索引） ========  (2026-10-25 14:13:57)
+[kb1]# systemctl daemon-reload && systemctl enable -q kibana && systemctl start kibana && systemctl is-active kibana
+active
+
+（Kibana available：等了 16 秒）
+第一次啟動到 available：16 秒
+[kb1]# systemctl status kibana --no-pager | head -12
+● kibana.service - Kibana
+     Loaded: loaded (/usr/lib/systemd/system/kibana.service; enabled; preset: disabled)
+     Active: active (running) since Sun 2026-10-25 06:13:57 UTC; 15s ago
+       Docs: https://www.elastic.co
+   Main PID: 365 (MainThread)
+      Tasks: 11 (limit: 51007)
+     Memory: 1.2G (peak: 1.2G)
+        CPU: 23.595s
+     CGroup: /docker/217ec8f03478086c680a82d0359f89b2fd31171cf17f51eb01f9df7653d59831/system.slice/kibana.service
+             └─365 /usr/share/kibana/bin/../node/default/bin/node /usr/share/kibana/bin/../node_modules/@kbn/cli/kibana/dist
+
+Oct 25 06:14:13 kb1 kibana[365]: [2026-10-25T06:14:13.095+00:00][INFO ][plugins.securitySolution.siemRuleMigrations] Updating indices - .kibana-siem-rule-migrations-rules-*
+
+[kb1]# ss -ltnp | grep 5601
+LISTEN 0      511    192.168.60.51:5601       0.0.0.0:*    users:(("MainThread",pid=365,fd=21))
+
+[kb1]# grep -oE "\"message\":\"[^\"]{0,240}" /var/log/kibana/kibana.log | sed "s/\"message\":\"//" | grep -iE "http server running|starting|kibana is now|deprecat|warn|elasticsearch|migrat|ready|config" | head -40
+Kibana is starting
+Kibana process configured with roles: [background_tasks, ui]
+http server running at https://192.168.60.51:5601
+Telemetry collection is disabled. For more information on telemetry settings, refer to https://www.elastic.co/docs/reference/kibana/configuration-reference/telemetry-settings.
+Registering Cases Templates V2 Migration Task
+Successfully connected to Elasticsearch after waiting for 569 milliseconds
+Waiting until all Elasticsearch nodes are compatible with Kibana before starting saved objects migrations...
+Starting saved objects migrations
+[.kibana_analytics] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 541ms.
+[.kibana_analytics] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 0ms.
+[.kibana_alerting_cases] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 621ms.
+[.kibana_alerting_cases] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 0ms.
+[.kibana_security_solution] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 766ms.
+[.kibana_security_solution] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 1ms.
+[.kibana] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 688ms.
+[.kibana] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 0ms.
+[.kibana_ingest] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 690ms.
+[.kibana_ingest] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 0ms.
+[.kibana_search_solution] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 778ms.
+[.kibana_search_solution] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 0ms.
+[.kibana_analytics] MARK_VERSION_INDEX_READY -> DONE. took: 231ms.
+[.kibana_analytics] Migration completed after 894ms
+[.kibana_alerting_cases] MARK_VERSION_INDEX_READY -> DONE. took: 223ms.
+[.kibana_alerting_cases] Migration completed after 893ms
+[.kibana_security_solution] MARK_VERSION_INDEX_READY -> DONE. took: 131ms.
+[.kibana_security_solution] Migration completed after 942ms
+[.kibana_search_solution] MARK_VERSION_INDEX_READY -> DONE. took: 129ms.
+[.kibana_search_solution] Migration completed after 941ms
+[.kibana] MARK_VERSION_INDEX_READY -> DONE. took: 134ms.
+[.kibana] Migration completed after 951ms
+[.kibana_ingest] MARK_VERSION_INDEX_READY -> DONE. took: 210ms.
+[.kibana_ingest] Migration completed after 1021ms
+[.kibana_task_manager] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 1013ms.
+[.kibana_task_manager] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 1ms.
+[.kibana_usage_counters] CREATE_NEW_TARGET -> CHECK_VERSION_INDEX_READY_ACTIONS. took: 1062ms.
+[.kibana_usage_counters] CHECK_VERSION_INDEX_READY_ACTIONS -> MARK_VERSION_INDEX_READY. took: 0ms.
+[.kibana_task_manager] MARK_VERSION_INDEX_READY -> DONE. took: 44ms.
+[.kibana_task_manager] Migration completed after 1107ms
+[.kibana_usage_counters] MARK_VERSION_INDEX_READY -> DONE. took: 41ms.
+[.kibana_usage_counters] Migration completed after 1129ms
+
+[kb1]# grep -E "\"log\":\{\"level\":\"(WARN|ERROR|FATAL)\"" /var/log/kibana/kibana.log | grep -oE "\"logger\":\"[^\"]+\"|\"message\":\"[^\"]{0,200}" | paste - - | sort | uniq -c | sort -rn | head -20
+      3 "message":"{\	"logger":"plugins.securitySolution.siemDashboardMigrations"
+      1 "message":"Error rolling over workflows data stream .workflows-execution-data-stream-logs: index_not_found_exception\n\tRoot causes:\n\t\tindex_not_found_exception: no such index [.workflows-execution-data-strea	"logger":"plugins.workflowsExecutionEngine.data-stream-rollover"
+      1 "message":"Error rolling over workflows data stream .workflows-events: index_not_found_exception\n\tRoot causes:\n\t\tindex_not_found_exception: no such index [.workflows-events]	"logger":"plugins.workflowsExecutionEngine.data-stream-rollover"
+      1 "message":"Error initializing AI assistant resources: Platinum, Enterprise or trial license needed	"logger":"plugins.elasticAssistant.service"
+      1 "message":"Could not check status of cases:cases_incremental_id_assignment, will continue scheduling it.	"logger":"plugins.cases.incremental_id_task"
+      1 "message":"Agent builder failed to register sample data links for logstsdb	"logger":"plugins.agentBuilder"
+
+[kb1]# ps -o pid,user,rss,args -C node | cut -c1-220
+    PID USER       RSS COMMAND
+
+
+======== 測試 1：狀態 ========  (2026-10-25 14:14:14)
+[kb1] GET /api/status
+（jq：{name, version: .version.number, overall: .status.overall, core: .status.core}）
+{
+  "name": "kb1",
+  "version": "9.5.5",
+  "overall": {
+    "level": "available",
+    "summary": "All services and plugins are available"
+  },
+  "core": {
+    "elasticsearch": {
+      "level": "available",
+      "summary": "Elasticsearch is available",
+      "meta": {
+        "warningNodes": [],
+        "incompatibleNodes": []
+      }
+    },
+    "savedObjects": {
+      "level": "available",
+      "summary": "SavedObjects service has completed migrations and is available",
+      "meta": {
+        "migratedIndices": {
+          "migrated": 0,
+          "skipped": 0,
+          "patched": 8
+        }
+      }
+    }
+  }
+}
+
+[kb1] GET /api/status
+（jq：.metrics | {last_updated, collection_interval_in_millis, process: {memory: .process.memory.heap, event_loop_delay: .process.event_loop_delay, uptime_ms: .process.uptime_in_millis}, os_load: .os.load, requests: .requests, response_times: .response_times, concurrent_connections}）
+{
+  "last_updated": "2026-10-25T06:14:12.662Z",
+  "collection_interval_in_millis": 5000,
+  "process": {
+    "memory": {
+      "total_in_bytes": 980303872,
+      "used_in_bytes": 753167848,
+      "size_limit": 1275068416
+    },
+    "event_loop_delay": 1465.909247,
+    "uptime_ms": 14851.942672
+  },
+  "os_load": {
+    "1m": 1.29,
+    "5m": 1.33,
+    "15m": 1.06
+  },
+  "requests": {
+    "disconnects": 0,
+    "total": 0,
+    "statusCodes": {},
+    "status_codes": {}
+  },
+  "response_times": {
+    "avg_in_millis": 0,
+    "max_in_millis": 0
+  },
+  "concurrent_connections": 1
+}
+
+[kb1] GET /api/status
+（jq：[.status.plugins | to_entries[] | select(.value.level != "available") | {plugin: .key, level: .value.level, summary: .value.summary}] | .[:15]）
+[]
+
+# 不帶帳號（status.allowAnonymous 預設 false）
+[kb1]# curl -sS -w '\nHTTP %{http_code}\n' --cacert /etc/kibana/certs/ca.crt https://kb1:5601/api/status | cut -c1-300
+{"status":{"overall":{"level":"available"}}}
+HTTP 200
+
+# HTTP/2 與 TLS 版本
+[kb1]# curl -sS -o /dev/null -w 'http_version=%{http_version}\n' --http2 --cacert /etc/kibana/certs/ca.crt -u 'elastic:ChangeMe_Elastic_2026' https://kb1:5601/api/status; for v in 1.1 1.2 1.3; do printf 'TLSv%s: ' $v; openssl s_client -connect kb1:5601 -CAfile /etc/kibana/certs/ca.crt -tls${v/./_} -cipher 'DEFAULT:@SECLEVEL=0' </dev/null 2>&1 | grep -q 'Cipher is (NONE)' && echo rejected || echo ok; done
+http_version=2
+TLSv1.1: rejected
+TLSv1.2: ok
+TLSv1.3: ok
+
+[kb1]# curl -sS -o /dev/null -D - --compressed --cacert /etc/kibana/certs/ca.crt -u 'elastic:ChangeMe_Elastic_2026' https://kb1:5601/login | grep -iE '^(HTTP|content-encoding|content-security)' | cut -c1-120
+HTTP/2 302 
+content-security-policy: script-src 'report-sample' 'self'; worker-src 'report-sample' 'self' blob:; style-src 'report-s
+content-security-policy-report-only: default-src 'report-sample' 'none'; font-src 'report-sample' 'self'; img-src 'repor
+
+
+======== 測試 2：Kibana 在 Elasticsearch 上建立的系統索引與連線 ========  (2026-10-25 14:14:16)
+[esc1] GET /_cat/indices/.kibana*,.kibana_task_manager*,.kibana_security_session*?v&h=index,health,pri,rep,docs.count,store.size&expand_wildcards=all&s=index
+index                                      health pri rep docs.count store.size
+.kibana-siem-rule-migrations-integrations  green    1   1          0       454b
+.kibana-siem-rule-migrations-prebuiltrules green    1   1          0       454b
+.kibana_9.5.5_001                          green    1   1          4      8.9kb
+.kibana_alerting_cases_9.5.5_001           green    1   1          1       454b
+.kibana_analytics_9.5.5_001                green    1   1          5       454b
+.kibana_ingest_9.5.5_001                   green    1   1          1       454b
+.kibana_locks-000001                       green    1   1          3     25.5kb
+.kibana_search_solution_9.5.5_001          green    1   1          0       454b
+.kibana_security_session_1                 green    1   1          0       454b
+.kibana_security_solution_9.5.5_001        green    1   1          3       454b
+.kibana_task_manager_9.5.5_001             green    1   1         61     50.3kb
+.kibana_usage_counters_9.5.5_001           green    1   1          6       454b
+
+
+[esc1] GET /_cat/aliases/.kibana*?v&h=alias,index&expand_wildcards=all&s=alias
+alias                           index
+.kibana                         .kibana_9.5.5_001
+.kibana_9.5.5                   .kibana_9.5.5_001
+.kibana_alerting_cases          .kibana_alerting_cases_9.5.5_001
+.kibana_alerting_cases_9.5.5    .kibana_alerting_cases_9.5.5_001
+.kibana_analytics               .kibana_analytics_9.5.5_001
+.kibana_analytics_9.5.5         .kibana_analytics_9.5.5_001
+.kibana_ingest                  .kibana_ingest_9.5.5_001
+.kibana_ingest_9.5.5            .kibana_ingest_9.5.5_001
+.kibana_search_solution         .kibana_search_solution_9.5.5_001
+.kibana_search_solution_9.5.5   .kibana_search_solution_9.5.5_001
+.kibana_security_session        .kibana_security_session_1
+.kibana_security_solution       .kibana_security_solution_9.5.5_001
+.kibana_security_solution_9.5.5 .kibana_security_solution_9.5.5_001
+.kibana_task_manager            .kibana_task_manager_9.5.5_001
+.kibana_task_manager_9.5.5      .kibana_task_manager_9.5.5_001
+.kibana_usage_counters          .kibana_usage_counters_9.5.5_001
+.kibana_usage_counters_9.5.5    .kibana_usage_counters_9.5.5_001
+
+
+[esc1] GET /_nodes/stats/http?filter_path=nodes.*.name,nodes.*.http.current_open,nodes.*.http.total_opened&pretty
+{
+  "nodes" : {
+    "-ACzG1zdS0qb7BBXcLvxhQ" : {
+      "name" : "esc1",
+      "http" : {
+        "current_open" : 49,
+        "total_opened" : 71
+      }
+    },
+    "vPxXdnxKRfmUW7crFcOZ5A" : {
+      "name" : "esc3",
+      "http" : {
+        "current_open" : 46,
+        "total_opened" : 46
+      }
+    },
+    "05i5USx2St26-BK-CK1iDQ" : {
+      "name" : "esc2",
+      "http" : {
+        "current_open" : 47,
+        "total_opened" : 47
+      }
+    }
+  }
+}
+
+
+
+======== 測試 3：Task Manager 健康狀態（顯示實際生效的 capacity / poll_interval） ========  (2026-10-25 14:14:17)
+[kb1] GET /api/task_manager/_health
+（jq：{status, last_update, configuration: .stats.configuration.value, runtime_status: .stats.runtime.status, capacity_estimation: .stats.capacity_estimation.value, workload_overdue: .stats.workload.value.overdue}）
+{
+  "status": "OK",
+  "last_update": "2026-10-25T06:14:17.230Z",
+  "configuration": {
+    "request_capacity": 1000,
+    "monitored_aggregated_stats_refresh_rate": 60000,
+    "monitored_stats_running_average_window": 50,
+    "monitored_task_execution_thresholds": {
+      "custom": {},
+      "default": {
+        "error_threshold": 90,
+        "warn_threshold": 80
+      }
+    },
+    "claim_strategy": "mget",
+    "poll_interval": 500,
+    "capacity": {
+      "config": 10,
+      "as_workers": 10,
+      "as_cost": 20
+    }
+  },
+  "runtime_status": "OK",
+  "capacity_estimation": {
+    "observed": {
+      "observed_kibana_instances": 1,
+      "max_throughput_per_minute_per_kibana": 1200,
+      "max_throughput_per_minute": 1200,
+      "minutes_to_drain_overdue": 37,
+      "avg_recurring_required_throughput_per_minute": 19,
+      "avg_recurring_required_throughput_per_minute_per_kibana": 19,
+      "avg_required_throughput_per_minute": 67,
+      "avg_required_throughput_per_minute_per_kibana": 67
+    },
+    "proposed": {
+      "provisioned_kibana": 2,
+      "min_required_kibana": 1,
+      "avg_recurring_required_throughput_per_minute_per_kibana": 10,
+      "avg_required_throughput_per_minute_per_kibana": 34
+    }
+  },
+  "workload_overdue": 37
+}
+
+
+======== 測試 4：建立 data view 並用 Kibana 查詢 ========  (2026-10-25 14:14:17)
+[kb1] POST /api/data_views/data_view
+{"data_view":{"title":"orders*","name":"orders","timeFieldName":"created_at"}}
+（jq：{id: .data_view.id, title: .data_view.title, timeFieldName: .data_view.timeFieldName, fields: (.data_view.fields | length)}）
+{
+  "id": "41adc2f5-3be8-4db8-a5d9-2b7f17ae6b64",
+  "title": "orders*",
+  "timeFieldName": "created_at",
+  "fields": 14
+}
+
+[kb1] GET /api/data_views
+（jq：.data_view | map({id, title, name})）
+[
+  {
+    "id": "41adc2f5-3be8-4db8-a5d9-2b7f17ae6b64",
+    "title": "orders*",
+    "name": "orders"
+  }
+]
+
+[kb1] POST /api/console/proxy?path=%2Forders%2F_count&method=GET
+（jq：.）
+{
+  "count": 50000,
+  "_shards": {
+    "total": 3,
+    "successful": 3,
+    "skipped": 0,
+    "failed": 0
+  }
+}
+
+[kb1] GET /api/saved_objects/_find?type=index-pattern&fields=title
+（jq：{total, saved_objects: [.saved_objects[] | {id, type, title: .attributes.title, namespaces}]}）
+{
+  "total": 1,
+  "saved_objects": [
+    {
+      "id": "41adc2f5-3be8-4db8-a5d9-2b7f17ae6b64",
+      "type": "index-pattern",
+      "title": "orders*",
+      "namespaces": [
+        "default"
+      ]
+    }
+  ]
+}
+
+
+======== 測試 5：重新啟動所需時間（已有 .kibana 索引） ========  (2026-10-25 14:14:19)
+[kb1]# systemctl restart kibana && echo restarted
+restarted
+
+（Kibana available：等了 14 秒）
+systemctl restart 到 available：16 秒
+[kb1] GET /api/status
+（jq：{overall: .status.overall.level, uptime_ms: .metrics.process.uptime_in_millis, heap: .metrics.process.memory.heap}）
+{
+  "overall": "available",
+  "uptime_ms": 9630.015213,
+  "heap": {
+    "total_in_bytes": 972427264,
+    "used_in_bytes": 782651200,
+    "size_limit": 1275068416
+  }
+}
+
+
+======== 測試 6：Elasticsearch 節點故障（停 esc1，elasticsearch.hosts 的第一個） ========  (2026-10-25 14:14:35)
+[esc1]# systemctl stop elasticsearch && echo stopped
+stopped
+
+第 1 次：overall=available，透過 Kibana 查 orders/_count=50000，442 ms
+第 2 次：overall=available，透過 Kibana 查 orders/_count=50000，244 ms
+第 3 次：overall=available，透過 Kibana 查 orders/_count=50000，288 ms
+第 4 次：overall=available，透過 Kibana 查 orders/_count=50000，241 ms
+第 5 次：overall=available，透過 Kibana 查 orders/_count=50000，235 ms
+第 6 次：overall=available，透過 Kibana 查 orders/_count=50000，207 ms
+[kb1] GET /api/data_views
+（jq：.data_view | map(.title)）
+[
+  "orders*"
+]
+
+[kb1] GET /api/status
+（jq：{overall: .status.overall, elasticsearch: .status.core.elasticsearch}）
+{
+  "overall": {
+    "level": "available",
+    "summary": "All services and plugins are available"
+  },
+  "elasticsearch": {
+    "level": "available",
+    "summary": "Elasticsearch is available",
+    "meta": {
+      "warningNodes": [],
+      "incompatibleNodes": []
+    }
+  }
+}
+
+[kb1]# grep -E "\"level\":\"(WARN|ERROR)\"" /var/log/kibana/kibana.log | grep -oE "\"message\":\"[^\"]{0,240}" | grep -iE "esc1|ECONNREFUSED|connection|NoLivingConnections|resurrect" | sort | uniq -c | head -10 || echo "(none)"
+
+[esc1]# systemctl start elasticsearch && echo started
+started
+
+（green：等了 2 秒）
+# 全部停掉：Elasticsearch 都不在時 Kibana 的狀態
+[kb1] GET /api/status
+（jq：{overall: .status.overall, elasticsearch: .status.core.elasticsearch}）
+{
+  "overall": {
+    "level": "critical"
+  },
+  "elasticsearch": null
+}
+
+[kb1]# curl -sS -o /dev/null -w '%{http_code}\n' --cacert /etc/kibana/certs/ca.crt -u 'elastic:ChangeMe_Elastic_2026' https://kb1:5601/api/status; systemctl is-active kibana
+503
+active
+
+（Kibana available：等了 41 秒）
+Elasticsearch 重新啟動後 Kibana 恢復 available：41 秒（含叢集組成）
+
+======== 測試 7：拼錯參數（elasticsearch.requestTimout），Kibana 拒絕啟動 ========  (2026-10-25 14:16:36)
+[kb1]# cp /etc/kibana/kibana.yml /root/kibana.yml.bak && echo "elasticsearch.requestTimout: 60000" >> /etc/kibana/kibana.yml && systemctl restart kibana; sleep 20; systemctl is-active kibana; journalctl -u kibana --no-pager --since -25s | grep -E "FATAL" | cut -c1-300 | head -3
+failed
+Oct 25 06:16:41 kb1 kibana[985]:  FATAL  Error: [config validation of [elasticsearch].requestTimout]: Additional properties are not allowed ('requestTimout' was unexpected)
+Oct 25 06:16:48 kb1 kibana[1007]:  FATAL  Error: [config validation of [elasticsearch].requestTimout]: Additional properties are not allowed ('requestTimout' was unexpected)
+Oct 25 06:16:54 kb1 kibana[1028]:  FATAL  Error: [config validation of [elasticsearch].requestTimout]: Additional properties are not allowed ('requestTimout' was unexpected)
+
+[kb1]# cp /root/kibana.yml.bak /etc/kibana/kibana.yml && systemctl reset-failed kibana; systemctl restart kibana && echo restarted
+restarted
+
+（Kibana available：等了 12 秒）
+
+======== 預設值核對：載入 9.5.5 安裝目錄裡的設定 schema，對空物件 validate 取預設值（bin/kibana-defaults.js） ========  (2026-10-25 14:17:09)
+[kb1]# f=$(ls /usr/share/kibana/node/*/bin/node /usr/share/kibana/node/bin/node 2>/dev/null | head -1); cd /tmp && timeout 600 $f /root/bin/kibana-defaults.js /usr/share/kibana > /tmp/kb-defaults.txt 2>/dev/null; wc -l < /tmp/kb-defaults.txt; mkdir -p /mnt/es-snapshots/.dist && cp /tmp/kb-defaults.txt /mnt/es-snapshots/.dist/kibana-defaults-9.5.5.txt
+811
+
+# kibana.yml 裡每個參數在 schema 預設值裡的對應（找不到的印 NOT FOUND；「以 xx 比對」是外掛 schema 的模糊比對，可能對到別的外掛）
+# 逐一以原始碼核對過的結果在 results/kibana-defaults-check.txt
+server.name                                                server.name|"kb1"|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.host                                                server.host|"localhost"|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.port                                                server.port|5601|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.publicBaseUrl                                       NOT FOUND
+server.maxPayload                                          server.maxPayload|1048576b|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.keepaliveTimeout                                    server.keepaliveTimeout|120000|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.socketTimeout                                       server.socketTimeout|120000|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.shutdownTimeout                                     server.shutdownTimeout|30000ms|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.compression.enabled                                 server.compression.enabled|true|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.compression.brotli.enabled                          server.compression.brotli.enabled|false|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.protocol                                            server.protocol|"http1"|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.ssl.enabled                                         server.ssl.enabled|false|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+server.ssl.certificate                                     NOT FOUND
+server.ssl.key                                             NOT FOUND
+server.ssl.supportedProtocols                              server.ssl.supportedProtocols|["TLSv1.2","TLSv1.3"]|node_modules/@kbn/core/packages/http/server-internal/src/http_config.js
+elasticsearch.hosts                                        elasticsearch.hosts|"http://localhost:9200"|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.username                                     NOT FOUND
+elasticsearch.ssl.certificateAuthorities                   NOT FOUND
+elasticsearch.ssl.verificationMode                         elasticsearch.ssl.verificationMode|"full"|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.requestTimeout                               elasticsearch.requestTimeout|30000ms|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.shardTimeout                                 elasticsearch.shardTimeout|30000ms|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.healthCheck.delay                            elasticsearch.healthCheck.delay|2500ms|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.maxSockets                                   elasticsearch.maxSockets|800|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.maxIdleSockets                               elasticsearch.maxIdleSockets|256|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.idleSocketTimeout                            elasticsearch.idleSocketTimeout|60000ms|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.compression                                  elasticsearch.compression|false|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.sniffOnStart                                 elasticsearch.sniffOnStart|false|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.sniffInterval                                elasticsearch.sniffInterval|false|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.sniffOnConnectionFault                       elasticsearch.sniffOnConnectionFault|false|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+elasticsearch.requestHeadersWhitelist                      elasticsearch.requestHeadersWhitelist|["authorization","es-client-authentication"]|node_modules/@kbn/core/packages/elasticsearch/server-internal/src/elasticsearch_config.js
+savedObjects.maxImportPayloadBytes                         savedObjects.maxImportPayloadBytes|26214400b|node_modules/@kbn/core/packages/saved-objects/base-server-internal/src/saved_objects_config.js
+savedObjects.maxImportExportSize                           savedObjects.maxImportExportSize|10000|node_modules/@kbn/core/packages/saved-objects/base-server-internal/src/saved_objects_config.js
+xpack.security.session.idleTimeout                         NOT FOUND
+xpack.security.session.lifespan                            NOT FOUND
+xpack.security.session.cleanupInterval                     NOT FOUND
+xpack.task_manager.capacity                                NOT FOUND
+xpack.task_manager.poll_interval                           NOT FOUND
+xpack.alerting.rules.minimumScheduleInterval.value         NOT FOUND
+xpack.reporting.csv.maxSizeBytes                           NOT FOUND
+xpack.reporting.csv.scroll.size                            NOT FOUND
+xpack.reporting.csv.scroll.duration                        NOT FOUND
+xpack.reporting.queue.timeout                              NOT FOUND
+unifiedSearch.autocomplete.valueSuggestions.timeout        （以 autocomplete.valueSuggestions.timeout 比對）?configSchema.autocomplete.valueSuggestions.timeout|1000ms|node_modules/@kbn/kql/server/config.js
+unifiedSearch.autocomplete.valueSuggestions.terminateAfter （以 autocomplete.valueSuggestions.terminateAfter 比對）?configSchema.autocomplete.valueSuggestions.terminateAfter|100000ms|node_modules/@kbn/kql/server/config.js
+ops.interval                                               ops.interval|5000ms|node_modules/@kbn/core/packages/metrics/server-internal/src/ops_config.js
+telemetry.optIn                                            （以 optIn 比對）?config.optIn|true|node_modules/@kbn/telemetry-plugin/server/config/config.js
+telemetry.allowChangingOptInStatus                         （以 allowChangingOptInStatus 比對）?config.allowChangingOptInStatus|true|node_modules/@kbn/telemetry-plugin/server/config/config.js
+newsfeed.enabled                                           （以 enabled 比對）?config.enabled|true|node_modules/@kbn/agent-builder-platform-plugin/server/config.js
+i18n.defaultLocale                                         i18n.defaultLocale|"en"|node_modules/@kbn/core/packages/i18n/server-internal/src/i18n_config.js
+path.data                                                  NOT FOUND
+pid.file                                                   NOT FOUND
+logging                                                    NOT FOUND
+
+======== 對照：同一份 kibana.yml 放到 Kibana 8.19.23（Elasticsearch 仍是 9.5.5） ========  (2026-10-25 14:17:13)
+[kb1]# systemctl stop kibana && cp /root/conf/elasticsearch-8.repo /etc/yum.repos.d/elasticsearch.repo && dnf downgrade -y -q --enablerepo=elasticsearch kibana-8.19.23 2>&1 | tail -3; rpm -q kibana; ls /etc/kibana; diff -q /root/conf/kibana.yml /etc/kibana/kibana.yml && echo "kibana.yml 保留"
+Downgraded:
+  kibana-8.19.23-1.aarch64                                                      
+
+kibana-8.19.23-1.aarch64
+certs
+kibana.keystore
+kibana.yml
+kibana.yml.rpm
+kibana.yml.rpmnew
+node.options
+node.options.rpmnew
+kibana.yml 保留
+
+[kb1]# S=$(date "+%F %T"); systemctl start kibana; sleep 60; systemctl is-active kibana; journalctl -u kibana --no-pager --since "$S" | grep -E "FATAL" | cut -c1-400 | head -3
+failed
+Oct 25 06:19:32 kb1 kibana[1221]:  FATAL  Error: [config validation of [i18n].defaultLocale]: definition for this key is missing
+Oct 25 06:19:37 kb1 kibana[1242]:  FATAL  Error: [config validation of [i18n].defaultLocale]: definition for this key is missing
+Oct 25 06:19:43 kb1 kibana[1262]:  FATAL  Error: [config validation of [i18n].defaultLocale]: definition for this key is missing
+
+# 8.x 沒有 i18n.defaultLocale（9.x 由 i18n.locale 改名而來）；換回 8.x 的名稱再啟動一次，看下一個擋住的原因
+[kb1]# sed -i "s/^i18n.defaultLocale:/i18n.locale:/" /etc/kibana/kibana.yml && grep -n "^i18n" /etc/kibana/kibana.yml; systemctl reset-failed kibana; S=$(date "+%F %T"); systemctl start kibana; sleep 60; systemctl is-active kibana; journalctl -u kibana --no-pager --since "$S" | grep -E "FATAL" | cut -c1-400 | head -3; grep -E "\"level\":\"(ERROR|FATAL)\"" /var/log/kibana/kibana.log | tail -3 | grep -oE "\"message\":\"[^\"]{0,400}"
+144:i18n.locale: "en"
+failed
+Oct 25 06:20:35 kb1 kibana[1298]: [2026-10-25T06:20:35.495+00:00][INFO ][savedobjects-service] [.kibana_task_manager] INIT -> FATAL. took: 10ms.
+Oct 25 06:20:35 kb1 kibana[1298]: [2026-10-25T06:20:35.496+00:00][FATAL][root] Reason: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5
+Oct 25 06:20:35 kb1 kibana[1298]: [2026-10-25T06:20:35.504+00:00][INFO ][savedobjects-service] [.kibana_usage_counters] INIT -> FATAL. took: 20ms.
+"message":"Reason: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5\nError: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5\n    at migrationStateActionMachine (/usr/share/kibana/node_mo
+"message":"Reason: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5\nError: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5\n    at migrationStateActionMachine (/usr/share/kibana/node_mo
+"message":"Reason: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5\nError: Unable to complete saved object migrations for the [.kibana_task_manager] index: The .kibana_task_manager alias is pointing to a newer version of Kibana: v9.5.5\n    at migrationStateActionMachine (/usr/share/kibana/node_mo
+
+[esc1]# rm -rf /mnt/es-snapshots/.dist
+
