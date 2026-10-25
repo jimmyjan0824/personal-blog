@@ -1,0 +1,22 @@
+# db1（主）+ db2、db3（從）+ app（持續寫入的用戶端）：Percona Server 5.7 GTID 複製，現場把從庫升級到 8.0 再切換
+x-node: &node
+  image: mysqlup-rocky9-ps57
+  pull_policy: never
+  platform: linux/amd64       # Percona 5.7 沒有 aarch64 套件
+  privileged: true            # systemd 當 PID 1
+  cgroup: host
+  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro"]
+  tmpfs: ["/run", "/run/lock"]
+  extra_hosts:
+    - "db1:192.168.57.11"
+    - "db2:192.168.57.12"
+    - "db3:192.168.57.13"
+    - "app:192.168.57.20"
+services:
+  db1: { <<: *node, hostname: db1, networks: { labnet: { ipv4_address: 192.168.57.11 } } }
+  db2: { <<: *node, hostname: db2, networks: { labnet: { ipv4_address: 192.168.57.12 } } }
+  db3: { <<: *node, hostname: db3, networks: { labnet: { ipv4_address: 192.168.57.13 } } }
+  app: { <<: *node, hostname: app, networks: { labnet: { ipv4_address: 192.168.57.20 } } }   # 模擬應用程式持續寫入，不啟動 mysqld
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 192.168.57.0/24 } ] }

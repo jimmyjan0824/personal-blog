@@ -1,0 +1,25 @@
+# /etc/my.cnf.d/replication.cnf（升級到 Percona Server 8.0 後的版本）
+# 和 5.7 版的差異：拿掉 query_cache_*、sql_mode 去掉 NO_AUTO_CREATE_USER、expire_logs_days 改 binlog_expire_logs_seconds、
+# master/relay_log_info_repository 拿掉（8.0 預設就是 TABLE 且已棄用）、slave_* 改成 replica_* 新名稱
+[mysqld]
+bind_address             = 0.0.0.0
+skip_name_resolve        = ON
+character_set_server     = utf8mb4
+collation_server         = utf8mb4_general_ci   # 保留 5.7 的排序規則（8.0 預設是 utf8mb4_0900_ai_ci），升級後新建的表與舊表一致
+sql_mode                 = ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+innodb_buffer_pool_size  = 256M
+innodb_flush_log_at_trx_commit = 1
+
+# ---- Binlog / GTID ----
+log_bin                  = mysql-bin
+binlog_format            = ROW
+sync_binlog              = 1
+binlog_expire_logs_seconds = 604800
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+log_replica_updates      = ON
+relay_log                = relay-bin
+relay_log_recovery       = ON
+replica_parallel_type    = LOGICAL_CLOCK
+replica_parallel_workers = 4
+replica_preserve_commit_order = ON
