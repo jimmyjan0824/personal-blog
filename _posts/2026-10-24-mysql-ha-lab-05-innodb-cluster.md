@@ -661,7 +661,7 @@ The Cluster was successfully rebooted.
 - 實測 Primary 停機後，Router 自動把 6446 導到新 Primary；舊 Primary 回來自動以 Secondary 加入。切換瞬間的連線會斷，應用程式要能重試。
 - 全叢集停機用 `rebootClusterFromCompleteOutage()` 恢復，新的 Primary 會是 GTID 最多的那台。
 
-這個系列到這裡告一段落。回到 [高可用與災難復原]({% post_url 2026-10-24-mysql-ops-03-ha-dr %}) 可以看各種方案的 RPO / RTO 比較。
+下一篇：[Percona Server 5.7 升級 8.0，先升從庫再主從切換]({% post_url 2026-10-25-mysql-ha-lab-06-upgrade-57-to-80 %})，處理線上既有 5.7 主從的升級。也可以回到 [高可用與災難復原]({% post_url 2026-10-24-mysql-ops-03-ha-dr %}) 可以看各種方案的 RPO / RTO 比較。
 
 ### 參考資料
 
