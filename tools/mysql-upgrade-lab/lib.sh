@@ -32,7 +32,7 @@ rs() {
   local n=$1
   echo "[$n] mysql> SHOW SLAVE STATUS\\G   （節錄）"
   docker compose exec -T "$n" mysql -e 'SHOW SLAVE STATUS\G' 2>&1 \
-    | grep -E 'Master_Host|Slave_IO_Running|Slave_SQL_Running:|Seconds_Behind|Last_(IO_|SQL_)?Err(no|or)|Retrieved_Gtid|Executed_Gtid|Auto_Position'
+    | grep -E 'Master_Host|Slave_IO_Running|Slave_SQL_Running:|Seconds_Behind|Last_(IO_|SQL_)?Err(no|or)|Retrieved_Gtid|Executed_Gtid|Auto_Position|^ *[0-9a-f]{8}-'
   echo
 }
 # 資料比對：每台的筆數與內容雜湊
@@ -40,7 +40,7 @@ rs() {
 sync_cmp() {
   local src=$1; shift
   docker compose exec -T app touch /tmp/writer.pause; sleep 1
-  local g; g=$(docker compose exec -T "$src" mysql -N -e 'SELECT @@GLOBAL.gtid_executed' | tr -d '\n')
+  local g; g=$(docker compose exec -T "$src" mysql -N -r -e 'SELECT @@GLOBAL.gtid_executed' | tr -d '\n')
   for n in "$@"; do
     m "$n" "SELECT WAIT_FOR_EXECUTED_GTID_SET('$g', 60) AS waited;   -- 0 = 已追上 $src"
   done

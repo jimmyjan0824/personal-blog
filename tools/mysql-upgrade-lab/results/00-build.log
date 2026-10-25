@@ -1,0 +1,62 @@
+
+======== 主機環境 ========  (2026-10-25 15:26:06)
+# 主機端：sw_vers 2>/dev/null; uname -m; docker version --format '{{.Server.Version}} {{.Server.Arch}}'
+ProductName:		macOS
+ProductVersion:		15.7.4
+BuildVersion:		24G517
+arm64
+29.9.2 arm64
+
+
+======== docker build mysqlup-rocky9-ps57 (linux/amd64) ========  (2026-10-25 15:26:06)
+docker.io/rockylinux/rockylinux:9
+#5 68.64   perl-libs-4:5.32.1-484.el9_8.x86_64                                           
+#5 68.64   perl-mro-1.23-484.el9_8.x86_64                                                
+#5 68.64   perl-overload-1.31-484.el9_8.noarch                                           
+#5 68.64   perl-overloading-0.02-484.el9_8.noarch                                        
+#5 68.64   perl-parent-1:0.238-460.el9.noarch                                            
+#5 68.64   perl-podlators-1:4.14-460.el9.0.1.noarch                                      
+#5 68.64   perl-subs-1.03-484.el9_8.noarch                                               
+#5 68.64   perl-vars-1.05-484.el9_8.noarch                                               
+#5 68.64 
+#5 68.64 Complete!
+#5 68.88 45 files removed
+#5 68.91 Created symlink /etc/systemd/system/systemd-logind.service → /dev/null.
+#5 68.91 Created symlink /etc/systemd/system/getty.target → /dev/null.
+#5 68.91 Created symlink /etc/systemd/system/console-getty.service → /dev/null.
+#5 DONE 68.9s
+
+#6 exporting to image
+#6 exporting layers
+#6 exporting layers 3.6s done
+#6 exporting manifest sha256:e2389c6dd9b7599c233ac96be4965976c91f848bccce33085a4e392ff19c391a done
+#6 exporting config sha256:8c1487d1bb579792f2c1df69f0239c77454d35d55d4b512c6ac6dca4a77cf619 done
+#6 exporting attestation manifest sha256:923995e6af1c4d619684af0dc21f3a6e494ed8b13db4eda6655621f320f254da done
+#6 exporting manifest list sha256:104e1539a3c6b39ac22c13207bedf6f691aca60641cddddbea60eeeef58928b7 done
+#6 naming to docker.io/library/mysqlup-rocky9-ps57:latest done
+#6 DONE 3.6s
+
+real	1m14.023s
+user	0m0.176s
+sys	0m0.154s
+Rocky Linux release 9.8 (Blue Onyx)
+x86_64
+Percona-Server-client-57-5.7.44-48.1.el9.x86_64
+Percona-Server-server-57-5.7.44-48.1.el9.x86_64
+Percona-Server-shared-57-5.7.44-48.1.el9.x86_64
+percona-release-1.0-34.noarch
+mysqld  Ver 5.7.44-48 for Linux on x86_64 (Percona Server (GPL), Release 48, Revision 497f936a373)
+
+======== ps57 套件庫可用的版本（最後 5 版） ========  (2026-10-25 15:27:23)
+Percona-Server-server-57.x86_64      5.7.41-44.1.el9       ps-57-release-x86_64 
+Percona-Server-server-57.x86_64      5.7.42-45.1.el9       ps-57-release-x86_64 
+Percona-Server-server-57.x86_64      5.7.42-46.1.el9       ps-57-release-x86_64 
+Percona-Server-server-57.x86_64      5.7.43-47.1.el9       ps-57-release-x86_64 
+Percona-Server-server-57.x86_64      5.7.44-48.1.el9       ps-57-release-x86_64 
+
+======== ps80 套件庫可用的版本（最後 5 版） ========  (2026-10-25 15:27:49)
+percona-server-server.x86_64        8.0.42-33.1.el9         ps-80-release-x86_64
+percona-server-server.x86_64        8.0.43-34.1.el9         ps-80-release-x86_64
+percona-server-server.x86_64        8.0.44-35.1.el9         ps-80-release-x86_64
+percona-server-server.x86_64        8.0.45-36.1.el9         ps-80-release-x86_64
+percona-server-server.x86_64        8.0.46-37.1.el9         ps-80-release-x86_64

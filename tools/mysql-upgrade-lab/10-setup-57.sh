@@ -2,6 +2,11 @@
 # 建立 Percona Server 5.7 一主二從（GTID）：db1 主、db2 / db3 從，並灌入測試資料
 source "$(dirname "$0")/lib.sh"
 docker compose down -v >/dev/null 2>&1; docker compose up -d; sleep 8
+# 實驗環境修正：Docker Desktop VM 的 fs.nr_open 是 1073741816，容器裡的 systemd（PID 1）nofile 也是這個值。
+# mysqld.service 有 PermissionsStartOnly=true，systemd 252 不會把 LimitNOFILE=5000 套用到 ExecStartPre，
+# mysqld_pre_systemd 裡的 mysqld --initialize 依這個上限配置記憶體，吃到 7 GB 被 OOM kill。
+# 把 PID 1 的上限降成實體 Rocky 9 主機的值（fs.nr_open 預設 1048576）
+for n in db1 db2 db3 app; do docker compose exec -T $n prlimit --pid 1 --nofile=1048576:1048576; done
 
 {
 note "環境"

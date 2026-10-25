@@ -1,0 +1,260 @@
+
+======== 切換前檢查 ========  (2026-10-25 15:54:56)
+[db1] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+---------------+-------------+-------------------+
+| @@hostname | @@version     | @@read_only | @@super_read_only |
++------------+---------------+-------------+-------------------+
+| db1        | 5.7.44-48-log |           0 |                 0 |
++------------+---------------+-------------+-------------------+
+
+[db2] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db1
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:225-601
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-601
+                Auto_Position: 1
+
+[db3] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db1
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:475-601
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-601
+                Auto_Position: 1
+
+[db2] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only, @@gtid_mode;
++------------+-----------+-------------+-------------------+-------------+
+| @@hostname | @@version | @@read_only | @@super_read_only | @@gtid_mode |
++------------+-----------+-------------+-------------------+-------------+
+| db2        | 8.0.46-37 |           1 |                 1 | ON          |
++------------+-----------+-------------+-------------------+-------------+
+
+[app]# echo "OK=$(grep -c OK /tmp/writer.log) ERR=$(grep -c ERR /tmp/writer.log)"; tail -1 /tmp/writer.log
+OK=588 ERR=0
+07:54:56.454 OK db1
+
+
+======== 步驟 1：舊主庫 db1 停止寫入（super_read_only），app 從這一刻開始寫入失敗 ========  (2026-10-25 15:54:56)
+[app]# date +%T.%3N
+07:54:56.739
+
+[db1] mysql> SET GLOBAL super_read_only = ON; SELECT @@GLOBAL.gtid_executed\G
+*************************** 1. row ***************************
+@@GLOBAL.gtid_executed: dce89f70-d048-11f1-9b4c-82a31f054add:1-603
+
+
+======== 步驟 2：等 db2、db3 套用完 db1 的所有交易 ========  (2026-10-25 15:54:56)
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603', 30) AS waited;
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603', 30) AS waited;
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+
+======== 步驟 3：db2 升為主庫 ========  (2026-10-25 15:54:57)
+[db2] mysql> STOP REPLICA; RESET REPLICA ALL; SET PERSIST super_read_only = OFF; SET PERSIST read_only = OFF;
+
+[db2]# sed -i '/super_read_only/d' /etc/my.cnf.d/server-id.cnf; cat /etc/my.cnf.d/server-id.cnf; cat /var/lib/mysql/mysqld-auto.cnf; echo
+[mysqld]
+server_id   = 2
+report_host = db2
+{"Version": 2, "mysql_dynamic_variables": {"read_only": {"Value": "OFF", "Metadata": {"Host": "localhost", "User": "root", "Timestamp": 1792914897315715}}, "super_read_only": {"Value": "OFF", "Metadata": {"Host": "localhost", "User": "root", "Timestamp": 1792914897313681}}}}
+
+
+======== 步驟 4：app 改寫 db2（實務上是改 VIP / DNS / Proxy） ========  (2026-10-25 15:54:57)
+[app]# echo db2 > /tmp/target; date +%T.%3N; sleep 2; tail -2 /tmp/writer.log
+07:54:57.545
+07:54:59.117 OK db2
+07:54:59.438 OK db2
+
+
+======== 步驟 5：db3 改接 db2 ========  (2026-10-25 15:54:59)
+[db3] mysql> STOP REPLICA; CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1; START REPLICA;
+
+[db3]# sleep 3
+
+[db3] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:1-16
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-16
+                Auto_Position: 1
+
+[db2] mysql> SHOW REPLICAS;
++-----------+------+------+-----------+--------------------------------------+
+| Server_Id | Host | Port | Source_Id | Replica_UUID                         |
++-----------+------+------+-----------+--------------------------------------+
+|         3 | db3  | 3306 |         2 | e1d68439-d048-11f1-9a4a-b21f06a1499f |
++-----------+------+------+-----------+--------------------------------------+
+
+
+======== 寫入中斷時間（app 寫入失敗的區間） ========  (2026-10-25 15:55:03)
+[app]# grep -n ERR /tmp/writer.log | head -3; echo ...; grep ERR /tmp/writer.log | tail -2; echo "ERR 筆數: $(grep -c ERR /tmp/writer.log)"; grep -m1 "OK db2" /tmp/writer.log
+590:07:54:57.120 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+591:07:54:57.445 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+...
+07:54:57.120 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+07:54:57.445 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+ERR 筆數: 2
+07:54:57.786 OK db2
+
+[app]# F=$(grep -m1 ERR /tmp/writer.log | cut -d" " -f1); L=$(grep -m1 "OK db2" /tmp/writer.log | cut -d" " -f1); echo "first ERR=$F  first OK on db2=$L"; python3 -c "import sys;from datetime import datetime as d;f=\"%H:%M:%S.%f\";print(\"寫入中斷秒數:\",(d.strptime(sys.argv[2],f)-d.strptime(sys.argv[1],f)).total_seconds())" $F $L 2>/dev/null || true
+first ERR=07:54:57.120  first OK on db2=07:54:57.786
+寫入中斷秒數: 0.666
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603,df5e7840-d048-11f1-9a41-56e611d96467:1-18', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.0.46-37 |     5607 | 12023439752639 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.0.46-37 |     5607 | 12023439752639 |
++------+-----------+----------+----------------+
+
+
+======== 步驟 6：舊主庫 db1（5.7）改當新主庫 db2（8.0）的從庫 ========  (2026-10-25 15:55:05)
+[db1]# printf 'super_read_only = ON\n' >> /etc/my.cnf.d/server-id.cnf; cat /etc/my.cnf.d/server-id.cnf
+[mysqld]
+server_id   = 1
+report_host = db1
+super_read_only = ON
+
+[db1] mysql> CHANGE MASTER TO MASTER_HOST='db2', MASTER_USER='repl', MASTER_PASSWORD='ChangeMe_Repl_2026', MASTER_AUTO_POSITION=1; START SLAVE;
+
+[db1]# sleep 5
+
+[db1] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:1-34
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-34
+                Auto_Position: 1
+
+[db1] mysql> SELECT COUNT(*) FROM appdb.t_orders;
++----------+
+| COUNT(*) |
++----------+
+|     5624 |
++----------+
+
+[db2] mysql> SELECT COUNT(*) FROM appdb.t_orders;
++----------+
+| COUNT(*) |
++----------+
+|     5624 |
++----------+
+
+[db1]# grep -E "\[ERROR\]" /var/log/mysqld.log | tail -5
+
+
+======== 步驟 6b：在 db2 做一次 DDL，看 5.7 從庫的反應 ========  (2026-10-25 15:55:10)
+[db2] mysql> CREATE TABLE appdb.t_after_switch (id INT PRIMARY KEY, v VARCHAR(20)); INSERT INTO appdb.t_after_switch VALUES (1, 'from-8.0'); SHOW CREATE TABLE appdb.t_after_switch\G
+*************************** 1. row ***************************
+       Table: t_after_switch
+Create Table: CREATE TABLE `t_after_switch` (
+  `id` int NOT NULL,
+  `v` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+
+[db1]# sleep 3
+
+[db1] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:1-47
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-47
+                Auto_Position: 1
+
+[db3] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:1-48
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-48
+                Auto_Position: 1
+
+[db1]# grep -E "\[ERROR\]" /var/log/mysqld.log | tail -5
+

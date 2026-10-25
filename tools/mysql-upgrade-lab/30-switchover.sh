@@ -12,7 +12,7 @@ note "步驟 1：舊主庫 db1 停止寫入（super_read_only），app 從這一
 x app 'date +%T.%3N'
 m db1 "SET GLOBAL super_read_only = ON; SELECT @@GLOBAL.gtid_executed\\G"
 note "步驟 2：等 db2、db3 套用完 db1 的所有交易"
-G=$(docker compose exec -T db1 mysql -N -e 'SELECT @@GLOBAL.gtid_executed' | tr -d '\n')
+G=$(docker compose exec -T db1 mysql -N -r -e 'SELECT @@GLOBAL.gtid_executed' | tr -d '\n')
 for n in db2 db3; do m $n "SELECT WAIT_FOR_EXECUTED_GTID_SET('$G', 30) AS waited;"; done
 note "步驟 3：db2 升為主庫"
 m db2 "STOP REPLICA; RESET REPLICA ALL; SET PERSIST super_read_only = OFF; SET PERSIST read_only = OFF;"

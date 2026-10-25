@@ -1,0 +1,103 @@
+MySQL upgrade lab — Percona Server 5.7 -> 8.0, replicas first + switchover, run 2026-10-25 on Docker Desktop
+
+Host
+- macOS 15.7.4 (24G517), Apple M4 (10 cores), 24 GB RAM
+- Docker Desktop 4.96.3, Docker Engine 29.9.2; VM: 10 CPUs, 7.7 GiB RAM
+- All containers run linux/amd64 under Rosetta (binfmt_misc "rosetta" handler enabled in the Docker VM);
+  base image rockylinux/rockylinux:9 -> Rocky Linux 9.8 (Blue Onyx), uname -m x86_64
+- docker CLI only in ~/.docker/bin; lib.sh already prepends it (worked as-is)
+
+Versions installed
+- 5.7: Percona-Server-{server,client,shared}-57-5.7.44-48.1.el9.x86_64 (latest in ps57 repo; el9 packages exist,
+  repo has 5.7.41 .. 5.7.44 for el9). mysqld Ver 5.7.44-48, Revision 497f936a373
+- 8.0: percona-server-{server,client,shared}-8.0.46-37.1.el9.x86_64 (latest in ps80 repo), Revision 39e2b60e
+- MySQL Shell: percona-mysql-shell 8.0.46-1.el9 (mysqlsh options in the script worked as written)
+- percona-release 1.0-34
+
+Timings (final clean run 15:51-15:57; first run was the same within a few seconds)
+- 00-build.sh: docker build 1m14s (dnf under emulation), whole script ~2 min
+- 10-setup-57.sh: 35 s (three fresh 5.7 inits + replication + 5000 seed rows)
+- 20-upgrade-replicas.sh: 3m16s total
+    db2: install percona-mysql-shell + upgrade checker ~66 s (only on the first node)
+         systemctl stop (innodb_fast_shutdown=0) 2.2 s; systemctl start 8.0 incl. DD/system table upgrade 3.9 s
+         ("Server upgrade from '50700' to '80046'" started->completed 2.0 s)
+         node out of replication (step 3 stop -> step 7 started): ~37 s, mostly dnf remove/install
+    db3: stop 2.2 s, start 3.8 s, out ~38 s
+- 30-switchover.sh: 19 s
+- 40-upgrade-old-primary.sh: 1m33s; db1 stop 2.3 s, start 3.9 s, out ~37 s
+- Data dir backup (cp -a) sizes: db2 123M, db3 187M, db1 187M
+
+Fixes (no upgrade procedure steps and no conf/*.cnf content were changed)
+F1. 10-setup-57.sh: first `systemctl enable --now mysqld` failed on all three nodes. mysqld_pre_systemd runs
+    `mysqld --initialize`, which was OOM-killed (kernel: "Out of memory: Killed process (mysqld) anon-rss:7705612kB";
+    unit "7.0G memory peak"). Restart=on-failure then started mysqld on a half-initialized datadir
+    ("Table 'mysql.user' doesn't exist"), so every later step failed with ERROR 2002/2013.
+    Root cause (verified with a test unit):
+      - Docker Desktop VM has fs.nr_open = 1073741816 and systemd (PID 1 in the container) raises its own
+        RLIMIT_NOFILE to that value.
+      - Percona's mysqld.service has PermissionsStartOnly=true; with that, systemd 252 does NOT apply the unit's
+        LimitNOFILE=5000 to ExecStartPre (test unit: PSO=true -> pre 1073741816 / main 5000; PSO=false -> 5000/5000).
+      - 5.7 `mysqld --initialize` sizes its structures from the open-files limit -> ~7 GB -> OOM.
+      The same --initialize run by hand with nofile 1048576 or 5000 peaks at ~60-100 MB.
+    Fix: right after `docker compose up` (outside the logged block) run
+      `prlimit --pid 1 --nofile=1048576:1048576` in every container, i.e. PID 1 gets the value a real Rocky 9 host
+    has (fs.nr_open default 1048576). After that init peaks ~350 MB and starts in ~3.5 s.
+    (Setting `ulimits: nofile` in compose.yaml does NOT help: systemd raises PID 1 back to fs.nr_open.)
+    This is a container artefact, but worth a footnote: on any host where fs.nr_open was raised, the first start of
+    Percona 5.7 via systemd can OOM during initialize.
+F2. lib.sh sync_cmp + 30-switchover.sh: `mysql -N` escapes the newline in a multi-UUID gtid_executed as a literal
+    "\n", so the logged WAIT_FOR_EXECUTED_GTID_SET('...,\n...') looked wrong (it still worked). Added -r (raw).
+F3. lib.sh rs(): Executed_Gtid_Set with two UUIDs is printed on two lines by \G; the grep only kept the first.
+    Added `^ *[0-9a-f]{8}-` to the pattern so the continuation line is shown.
+Everything else (package names, ps57 el9 availability, mysqlsh options, socket path, sleeps) worked as written.
+
+Observations
+1. Upgrade checker (mysqlsh util check-for-server-upgrade --target-version=8.0.46): Errors 0, Warnings 3, Notices 1
+   - reserved keyword: appdb.t_rank.rank (column)
+   - utf8mb3: appdb.t_legacy.name (utf8)
+   - default auth plugin caching_sha2_password (generic warning)
+   - notice: global sql_mode uses obsolete NO_AUTO_CREATE_USER (will be cleared)
+   - checks 15/16/17 (removed sysvars / new defaults) were skipped: they need configPath; the script does not pass it,
+     so the checker did NOT flag query_cache_*, expire_logs_days etc. -> --validate-config is what catches them.
+   - t_myisam (MyISAM) and INT(10) ZEROFILL were not reported by the checker.
+   - mysqlsh prints "Cannot set LC_ALL to locale en_US.UTF-8" (no glibc-langpack-en in the image), harmless.
+2. dnf remove Percona-Server-*-57: removes /etc/my.cnf (alternatives symlink) and the systemd enable symlinks;
+   it copies /etc/my.cnf.d to /etc/my.cnf.d_backup-YYYYMMDD-HHMM but keeps /etc/my.cnf.d in place. Datadir untouched.
+   The 8.0 package installs a plain /etc/my.cnf (no !includedir) and re-enables mysqld.service (is-enabled = enabled).
+3. Trap 1 (db2): my_print_defaults mysqld with the 8.0 /etc/my.cnf only shows datadir/socket/log-error/pid-file
+   -> my.cnf.d (server_id, gtid, binlog...) would be ignored. Appending `!includedir /etc/my.cnf.d` fixed it.
+4. Trap 2 (db2): mysqld --validate-config with the 5.7 replication.cnf -> exit=1:
+     [Warning] [MY-011068] The syntax 'expire-logs-days' is deprecated ... use binlog_expire_logs_seconds
+     [ERROR] [MY-000077] Error while setting value '...NO_AUTO_CREATE_USER...' to 'sql_mode'.
+     [ERROR] [MY-010119] Aborting
+   Note: it stops at the FIRST error (sql_mode); query_cache_type/size, master_info_repository etc. were never
+   reported because validation aborted there. With 80-replication.cnf: exit=0, warnings only
+   ('binlog_format' deprecated, '--replica-parallel-type' deprecated, --secure-log-path insecure).
+5. First 8.0 start: "Starting upgrade of data directory" -> "Server upgrade from '50700' to '80046' completed" in ~2 s,
+   no [ERROR]. Replication restarted by itself after the upgrade (STOP SLAVE is not persisted, no skip_replica_start),
+   and the replica caught up within the 3 s sleep. super_read_only=1 (from server-id.cnf), collation_server kept
+   utf8mb4_general_ci, replica_parallel_workers 4. Accounts kept mysql_native_password. t_legacy now reports
+   utf8mb3_general_ci.
+6. Mixed version 5.7 primary -> 8.0 replicas: no errors; row counts + CRC identical on all nodes after each step.
+   App writes during 20: OK=586 ERR=0 (no write impact while upgrading replicas).
+7. Switchover (30): super_read_only on db1 -> WAIT_FOR_EXECUTED_GTID_SET returned 0 immediately on db2/db3 ->
+   db2 promoted (RESET REPLICA ALL, SET PERSIST read_only/super_read_only OFF) -> app target switched.
+   Write outage: first ERR 07:54:57.120 -> first OK on db2 07:54:57.786 = 0.666 s, 2 failed writes, all
+   "ERROR 1290 ... running with the --read-only option". First run: 1.039 s, 3 failed writes.
+   (Writer does ~3 writes/s under emulation, so resolution is ~0.33 s.)
+   db3 re-pointed to db2 with SOURCE_AUTO_POSITION=1: running, 0 lag, CRC equal to db2.
+8. 5.7 db1 as replica of 8.0 db2 did NOT break (both runs): IO/SQL Running Yes, 0 lag, no [ERROR] in db1's log.
+   Even the DDL from 8.0 (CREATE TABLE t_after_switch + INSERT) replicated; on db1 it shows as `int(11)`,
+   DEFAULT CHARSET=utf8mb4 (general_ci). Most likely because collation_server is pinned to utf8mb4_general_ci
+   (8.0 binlog carries a collation 5.7 knows) and repl uses mysql_native_password. Not tested: with the 8.0 default
+   utf8mb4_0900_ai_ci, or with an account using caching_sha2_password, the 5.7 replica would be expected to fail
+   (unknown collation 255 / auth) — so "it worked here" is not a general guarantee; MySQL does not support
+   replicating from a newer major to an older one.
+9. Old primary upgraded (40): same path, 8.0 start 3.9 s, rejoined db2 via auto-position, caught up.
+   All three 8.0.46-37, db2 read_only=0, db1/db3 super_read_only=1, SHOW REPLICAS lists db1 + db3.
+10. No lost writes: final app log OK=892 ERR=2; rows with note 'w-%' = 589 (src db1) + 303 (src db2) = 892,
+    total rows 5892 = 5000 seed + 892, identical count and CRC (12618375119959) on db1/db2/db3.
+11. Leftovers after upgrade: t_myisam still MyISAM, t_legacy still utf8mb3, all accounts mysql_native_password,
+    /var/lib/mysql-5.7-backup (123-187M) on each node.
+
+Cleanup: docker compose down -v (image mysqlup-rocky9-ps57 kept)
