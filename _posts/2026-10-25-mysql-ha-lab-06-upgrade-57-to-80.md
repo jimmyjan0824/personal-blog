@@ -10,7 +10,7 @@ description: 在一主二從的 Percona Server 5.7.44 GTID 複製架構上，先
 
 1. 先把**從庫**一台一台就地升級到 8.0（5.7 主庫 → 8.0 從庫是官方支援的方向）。
 2. 兩台從庫都是 8.0 之後，做一次**計畫內切換**，讓 8.0 的從庫變成新主庫。
-3. 最後再升級舊主庫，讓它以從庫身分接回來。
+3. 最後把舊主庫升級到 8.0，再以從庫身分接回新主庫。
 
 整個過程中有一個模擬應用程式每 0.2 秒寫一筆資料，用來量測寫入中斷的時間，並在最後核對有沒有掉資料。
 
@@ -21,7 +21,7 @@ description: 在一主二從的 Percona Server 5.7.44 GTID 複製架構上，先
 > - 5.7 用 `ps57` 套件庫的最新版 **Percona Server 5.7.44-48.1**（5.7 已在 2023-10 EOL，這是公開套件庫的最後一版，el9 套件從 5.7.41 開始提供）；8.0 用 `ps80` 套件庫的最新版 **8.0.46-37.1**，和本系列其他篇相同。
 > - 文中的指令輸出都是實際執行的結果：Rocky Linux 9.8 容器 + systemd，用 `dnf` 從 `repo.percona.com` 實際安裝與升級（MacBook Air M4 / Docker Desktop）。**Percona 5.7 沒有 aarch64 套件**，所以整組環境以 `linux/amd64` 透過 Rosetta 模擬執行，輸出的架構字樣都是 `x86_64`。
 > - 驗證腳本與完整輸出在 repo 的 [`tools/mysql-upgrade-lab`](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/mysql-upgrade-lab)。
-> - **沒有實測的部分**：`firewalld`、SELinux（容器內沒有），以及「5.7 從庫接 8.0 主庫」在 8.0 預設排序規則下的行為（見步驟 9）。
+> - **沒有實測的部分**：`firewalld`、SELinux（容器內沒有），以及步驟 9 的 `CHANGE REPLICATION SOURCE` 在 db1 上的這個寫法（實測時順序不同，見文末「驗證方式與結果」）。
 {: .prompt-warning }
 
 ## 架構
@@ -40,10 +40,11 @@ description: 在一主二從的 Percona Server 5.7.44 GTID 複製架構上，先
 | 起始 | 5.7 主 | 5.7 從 | 5.7 從 | db1 → db2、db3 |
 | 升級 db2（步驟 1~5） | 5.7 主 | **8.0 從** | 5.7 從 | db1 → db2、db3 |
 | 升級 db3（步驟 6） | 5.7 主 | 8.0 從 | **8.0 從** | db1 → db2、db3 |
-| 切換（步驟 7~8） | 5.7 從 | **8.0 主** | 8.0 從 | db2 → db1、db3 |
-| 升級 db1（步驟 9） | **8.0 從** | 8.0 主 | 8.0 從 | db2 → db1、db3 |
+| 切換（步驟 7） | 5.7 唯讀、不複製 | **8.0 主** | 8.0 從 | db2 → db3 |
+| 升級 db1（步驟 8） | **8.0** 唯讀、不複製 | 8.0 主 | 8.0 從 | db2 → db3 |
+| db1 接回（步驟 9） | 8.0 從 | 8.0 主 | 8.0 從 | db2 → db1、db3 |
 
-> 為什麼不直接升主庫？MySQL 只保證「**舊版主庫 → 新版從庫**」的複製，反方向（8.0 主庫 → 5.7 從庫）不支援。先升從庫，整個過程中複製方向永遠是舊 → 新；切換後舊主庫雖然暫時是 5.7，也應該盡快升級，不要讓它長時間當 8.0 的從庫。
+> 為什麼不直接升主庫？MySQL 只保證「**舊版主庫 → 新版從庫**」的複製，反方向（8.0 主庫 → 5.7 從庫）不支援。先升從庫，整個過程中複製方向永遠是舊 → 新；切換後舊主庫還是 5.7，**不能直接接到 8.0 新主庫**，要先升級到 8.0 再接回去。
 {: .prompt-info }
 
 ## 步驟 0：5.7 起始環境
@@ -597,48 +598,40 @@ first ERR=07:54:57.120  first OK on db2=07:54:57.786
 | db3  | 8.0.46-37 |     5607 | 12023439752639 |
 ```
 
-## 步驟 8：舊主庫 db1（5.7）暫時接到 db2（8.0）
+## 步驟 8：先把舊主庫 db1 升級到 8.0
 
-切換後 db1 還是 5.7。要讓它跟上新主庫的資料，先把它接成 db2 的從庫（設定檔同時加上 `super_read_only = ON`，避免重啟後變成可寫）：
+切換後 db1 還是 5.7，而且已經是 `super_read_only`，沒有任何複製。**不要**把它直接接成 db2 的從庫：
 
-```sql
--- db1（5.7 語法）
-CHANGE MASTER TO MASTER_HOST='db2', MASTER_USER='repl', MASTER_PASSWORD='ChangeMe_Repl_2026', MASTER_AUTO_POSITION=1;
-START SLAVE;
-```
-
-```console
-[db1] mysql> SHOW SLAVE STATUS\G   （節錄）
-                  Master_Host: db2
-             Slave_IO_Running: Yes
-            Slave_SQL_Running: Yes
-        Seconds_Behind_Master: 0
-            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
-df5e7840-d048-11f1-9a41-56e611d96467:1-34
-```
-
-再在 db2（8.0）上做一次 DDL：
-
-```console
-[db2] mysql> CREATE TABLE appdb.t_after_switch (id INT PRIMARY KEY, v VARCHAR(20)); INSERT INTO appdb.t_after_switch VALUES (1, 'from-8.0');
-```
-
-db1（5.7）照樣套用，`Slave_SQL_Running: Yes`、錯誤日誌沒有 `[ERROR]`。
-
-> **這次能動，不代表 8.0 → 5.7 的複製是安全的**。官方不支援新版主庫複製到舊版從庫，這次沒出事主要是因為：
+> MySQL 不支援 8.0 主庫複製到 5.7 從庫。就算一時沒出錯，也只是剛好沒碰到不相容的地方，例如：
 >
-> - `collation_server` 固定成 5.7 也有的 `utf8mb4_general_ci`。若 8.0 用預設的 `utf8mb4_0900_ai_ci`（編號 255），5.7 看不懂這個排序規則，DDL 或含字串的事件很可能讓 5.7 從庫的 SQL 執行緒停掉（**本篇未實測**）。
-> - 複製帳號是 `mysql_native_password`；若是 8.0 新建的 `caching_sha2_password` 帳號，5.7 連不上。
-> - 這段期間沒有用到任何 8.0 才有的語法或功能。
+> - 8.0 預設排序規則 `utf8mb4_0900_ai_ci`（編號 255）5.7 不認得，帶到這個排序規則的事件會讓 5.7 從庫的 SQL 執行緒停掉。
+> - 8.0 新建的帳號預設用 `caching_sha2_password`，5.7 從庫的複製連線認證不過。
+> - 8.0 才有的語法（視窗函數、CTE、`INVISIBLE` 索引等）或新的 binlog 事件，5.7 解析不了。
 >
-> 所以這一步只是「過渡」，目的是讓舊主庫不要落後太多，**應該緊接著就升級它**，或乾脆不接、直接用新主庫的備份重建。
+> 這些錯誤有可能在接上去幾個小時、幾天後才出現，到時候 5.7 從庫已經和主庫不一致。
 {: .prompt-danger }
 
-## 步驟 9：升級舊主庫 db1
+所以順序是：**db1 先升級到 8.0，再接回 db2**。db1 不複製的這段時間，db2 產生的交易都留在 db2 的 binlog 裡，等 db1 接回去時用 GTID 自動補上；只要 `binlog_expire_logs_seconds`（本例 7 天）比 db1 升級的時間長就沒問題。
 
-db1 照步驟 2~5 升級（停複製 → `innodb_fast_shutdown = 0` 關機 → 備份 → 換套件 → 補 includedir 與 8.0 設定 → 啟動）。實測：
+設定檔先加上 `super_read_only = ON`，避免升級重啟後 db1 變成可寫、被誤寫入產生多餘的 GTID：
 
 ```console
+[db1]# printf 'super_read_only = ON\n' >> /etc/my.cnf.d/server-id.cnf; cat /etc/my.cnf.d/server-id.cnf
+[mysqld]
+server_id   = 1
+report_host = db1
+super_read_only = ON
+```
+
+接著照步驟 2~5 升級（`innodb_fast_shutdown = 0` 關機 → 備份 → 換套件 → 補 includedir 與 8.0 設定 → `--validate-config` → 啟動）。實測：
+
+```console
+[db1]# time systemctl stop mysqld
+real	0m2.287s
+
+[db1]# du -sh /var/lib/mysql-5.7-backup
+187M	/var/lib/mysql-5.7-backup
+
 [db1]# time systemctl start mysqld
 real	0m3.924s
 
@@ -646,17 +639,53 @@ real	0m3.924s
 2026-10-25T07:56:32.726364Z 5 [System] [MY-013381] [Server] Server upgrade from '50700' to '80046' started.
 2026-10-25T07:56:34.779445Z 5 [System] [MY-013381] [Server] Server upgrade from '50700' to '80046' completed.
 
+[db1] mysql> SELECT @@hostname, @@server_id, @@version, @@gtid_mode, @@super_read_only, @@collation_server\G
+                @@hostname: db1
+               @@server_id: 1
+                 @@version: 8.0.46-37
+               @@gtid_mode: ON
+         @@super_read_only: 1
+        @@collation_server: utf8mb4_general_ci
+```
+
+> **退路要在切換前就準備好**。db1 一旦用 8.0 啟動就回不去 5.7，所以「切換後發現 8.0 有問題、退回 5.7」不能指望舊主庫。要保留退路，就在切換前做好 5.7 的完整備份（例如步驟 7 前對 db1 做一次 XtraBackup 或磁碟快照），或另外留一台不升級的 5.7 節點；但要注意，切換後在 8.0 上寫入的資料沒辦法用複製帶回 5.7，退回時這段資料要另外處理。
+{: .prompt-warning }
+
+## 步驟 9：db1 接回新主庫 db2
+
+db1 已經是 8.0，用 8.0 語法接到 db2，GTID 自動定位會從 db1 缺少的第一個交易開始補：
+
+```sql
+-- db1
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1;
+START REPLICA;
+```
+
+```console
 [db1] mysql> SHOW SLAVE STATUS\G   （節錄）
                   Master_Host: db2
              Slave_IO_Running: Yes
             Slave_SQL_Running: Yes
         Seconds_Behind_Master: 0
-           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:183-301
             Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
 df5e7840-d048-11f1-9a41-56e611d96467:1-301
+                Auto_Position: 1
 ```
 
-升級期間 db1 停了約 37 秒，期間 db2 產生的交易在 db1 啟動後自動補上。
+`dce89f70-...:1-603` 是 db1 自己當主庫時的交易，`df5e7840-...:1-301` 是 db2 當主庫後的交易，全部都補上了。db2 在這段期間建的表（`t_after_switch`）也出現在 db1：
+
+```console
+[db1] mysql> SELECT TABLE_NAME, ENGINE, TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA='appdb' ORDER BY 1;
++----------------+--------+--------------------+
+| TABLE_NAME     | ENGINE | TABLE_COLLATION    |
++----------------+--------+--------------------+
+| t_after_switch | InnoDB | utf8mb4_general_ci |
+| t_legacy       | InnoDB | utf8mb3_general_ci |
+| t_myisam       | MyISAM | utf8mb4_general_ci |
+| t_orders       | InnoDB | utf8mb4_general_ci |
+| t_rank         | InnoDB | utf8mb4_general_ci |
++----------------+--------+--------------------+
+```
 
 ## 步驟 10：最終驗證
 
@@ -733,7 +762,7 @@ OK=892 ERR=2
 ./00-build.sh               # Rocky 9.8 + systemd + Percona Server 5.7.44-48.1（linux/amd64）
 ./10-setup-57.sh            # 5.7 一主二從（GTID），app 開始每 0.2 秒寫入 db1
 ./20-upgrade-replicas.sh    # db2、db3 依序就地升級到 8.0.46-37.1
-./30-switchover.sh          # db2 升為主庫、db3 改接 db2、量測寫入中斷；db1（5.7）接 db2（8.0）
+./30-switchover.sh          # db2 升為主庫、db3 改接 db2、量測寫入中斷
 ./40-upgrade-old-primary.sh # db1 升級到 8.0，核對 app 每一筆成功寫入
 ```
 
@@ -744,8 +773,11 @@ OK=892 ERR=2
 | 5 啟動 8.0 | 錯誤日誌、`@@version`、`SHOW SLAVE STATUS` | `Server upgrade ... completed`、無 `[ERROR]`、IO / SQL `Yes` | ✅ 三台都是，啟動約 3.9 秒 |
 | 6 混合版本 | 5.7 主庫寫入，比對三台筆數與 CRC | 完全一致；app 寫入 0 失敗 | ✅ OK=586、ERR=0 |
 | 7 切換 | `WAIT_FOR_EXECUTED_GTID_SET`、db3 改接、app 紀錄 | 回傳 `0`、db3 無延遲、寫入恢復 | ✅ 中斷 0.67 秒（另一次 1.04 秒） |
-| 8 5.7 接 8.0 | `SHOW SLAVE STATUS`、8.0 上 DDL | IO / SQL `Yes` | ✅ 本次設定下可運作（見警告） |
-| 9~10 最終 | 三台筆數與 CRC、app 成功筆數 vs 資料庫筆數 | 一致；892 = 589 + 303 | ✅ 無資料遺失 |
+| 8~9 舊主庫升級、接回 | 錯誤日誌、`SHOW SLAVE STATUS`、`Executed_Gtid_Set` | 升級完成無 `[ERROR]`；IO / SQL `Yes`、補齊 db2 的交易 | ✅（實測順序不同，見下方說明） |
+| 10 最終 | 三台筆數與 CRC、app 成功筆數 vs 資料庫筆數 | 一致；892 = 589 + 303 | ✅ 無資料遺失 |
+
+> **步驟 8、9 的實測順序和文中不同**：實測腳本（`30-switchover.sh`、`40-upgrade-old-primary.sh`）是在切換後先讓 5.7 的 db1 用 `CHANGE MASTER TO` 暫時接到 8.0 的 db2，再就地升級 db1。8.0 → 5.7 的複製官方不支援，所以文中改成「先升級 db1、再接回 db2」的正確順序，沒有重跑。文中步驟 8、9 的輸出取自那次實測（關機、升級、啟動的輸出與順序無關；最後的 `SHOW SLAVE STATUS`、GTID 集合與表清單是 db1 升級後接著 db2 的最終狀態），步驟 9 的 `CHANGE REPLICATION SOURCE TO` 在 db1 上沒有以這個順序實際執行過，但與步驟 7 在 db3 上執行的是同一個指令。實測中 5.7 的 db1 跟著 db2 時沒有出錯，那是因為 `collation_server` 固定成 `utf8mb4_general_ci`、複製帳號是 `mysql_native_password`，屬於運氣，不代表可以這樣做。
+{: .prompt-info }
 
 每一步的耗時：
 
