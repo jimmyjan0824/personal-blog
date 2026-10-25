@@ -1,0 +1,4 @@
+# 附加到 /etc/kibana/node.options 的最後（RPM 原本的內容保留）
+# 建議（預設由 Node.js 依機器記憶體決定）。Kibana（Node.js）的 V8 heap 上限，單位 MB；
+# 4 GB 的 Kibana 主機給 2 GB，其餘留給 OS 與 Node.js heap 以外的記憶體。heap 用完時 Kibana 會直接當掉重啟
+--max-old-space-size=2048

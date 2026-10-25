@@ -1,4 +1,4 @@
-# es1：單節點；esc1~esc3（+esc4 擴充）：三節點叢集；esu1~esu3：8.19 → 9.5 滾動升級；esd9 / esd8：預設值對照
+# es1：單節點；esc1~esc3（+esc4 擴充）：三節點叢集；esu1~esu3：8.19 → 9.5 滾動升級；esd9 / esd8：預設值對照；kb1：Kibana
 x-node: &node
   image: eslab-rocky9-es9
   pull_policy: never
@@ -19,6 +19,7 @@ x-node: &node
     - "esu2:192.168.60.32"
     - "esu3:192.168.60.33"
     - "esd9:192.168.60.41"
+    - "kb1:192.168.60.51"
 services:
   es1:  { <<: *node, image: eslab-rocky9-base, hostname: es1,  networks: { labnet: { ipv4_address: 192.168.60.11 } } }
   esc1: { <<: *node, hostname: esc1, networks: { labnet: { ipv4_address: 192.168.60.21 } } }
@@ -29,6 +30,7 @@ services:
   esu2: { <<: *node, image: eslab-rocky9-es8, hostname: esu2, networks: { labnet: { ipv4_address: 192.168.60.32 } } }
   esu3: { <<: *node, image: eslab-rocky9-es8, hostname: esu3, networks: { labnet: { ipv4_address: 192.168.60.33 } } }
   esd9: { <<: *node, hostname: esd9, networks: { labnet: { ipv4_address: 192.168.60.41 } } }
+  kb1:  { <<: *node, image: eslab-rocky9-base, hostname: kb1,  networks: { labnet: { ipv4_address: 192.168.60.51 } } }
   esd8: { <<: *node, image: eslab-rocky9-es8, hostname: esd8, networks: { labnet: { ipv4_address: 192.168.60.42 } } }
 networks:
   labnet:

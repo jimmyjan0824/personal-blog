@@ -1,0 +1,171 @@
+# /etc/kibana/kibana.yml
+# Kibana 9.5 連線三節點叢集 es-prod（esc1~esc3）：效能與運維設定
+# 以「獨立一台 4 GB RAM、2 vCPU 的 Kibana 主機，前面沒有反向代理，使用者直接以 HTTPS 連 5601」為基準。
+# 每個參數上一行的註解：
+#   建議：調整過的值（括號內是預設值）
+#   預設：9.5.5 的預設值（Kibana 沒有 include_defaults 這類 API，預設值是從 9.5.5 安裝目錄裡各外掛的設定 schema 核對的，
+#         方法見文章「驗證方式與結果」），寫出來是為了讓設定一目了然，日後要調整時知道從哪裡開始
+#   必要：名稱、路徑、位址、憑證等依環境而定、沒有好壞之分的值
+# Kibana 的設定 schema 是嚴格的：拼錯或不存在的參數會讓 Kibana 拒絕啟動（FATAL），不會被默默忽略。
+# 密碼與加密金鑰不寫在這裡，放在 kibana-keystore（/etc/kibana/kibana.keystore）：
+#   elasticsearch.password、xpack.encryptedSavedObjects.encryptionKey、xpack.reporting.encryptionKey、xpack.security.encryptionKey
+# 改了這個檔案都要 systemctl restart kibana（沒有線上調整）。
+
+#------------------------------------------------------------------------------
+# 伺服器
+#------------------------------------------------------------------------------
+# 必要（預設 kibana 主機名）。顯示在 /api/status 與監控畫面，多台 Kibana 時用來分辨
+server.name: kb1
+# 建議（預設 localhost = 只聽 loopback，別台連不進來）。綁內網 IP
+server.host: "192.168.60.51"
+# 預設
+server.port: 5601
+# 建議（預設不設定，啟動時會 WARN）。使用者在瀏覽器實際輸入的網址；告警通知、報表、分享連結裡的網址都用它
+server.publicBaseUrl: "https://kb1:5601"
+# 預設（1 MB）。單一請求 body 的上限；匯入大型儀表板會撞到的是下面的 savedObjects.maxImportPayloadBytes，不是這個
+server.maxPayload: 1048576
+# 預設（毫秒）。keep-alive 連線閒置多久後關閉
+server.keepaliveTimeout: 120000
+# 預設（毫秒）。socket 無活動多久後關閉
+server.socketTimeout: 120000
+# 預設。收到 SIGTERM 後，等進行中的請求完成的上限，systemctl stop / restart 最多會等這麼久
+server.shutdownTimeout: "30s"
+# 預設。回應以 gzip 壓縮（瀏覽器下載的 JS bundle 很大，不要關）
+server.compression.enabled: true
+# 預設。brotli 壓縮率較好但較吃 CPU
+server.compression.brotli.enabled: false
+# 建議（預設 http1）。HTTP/2 讓瀏覽器在一條連線上多工載入大量 bundle 與 API 請求，需要 server.ssl.enabled: true
+server.protocol: http2
+# 必要。瀏覽器到 Kibana 的 HTTPS
+server.ssl.enabled: true
+# 必要。用同一個自建 CA 簽的 kb1 憑證（SAN 含 kb1、kb1.lab.local、192.168.60.51）
+server.ssl.certificate: /etc/kibana/certs/kb1.crt
+# 必要
+server.ssl.key: /etc/kibana/certs/kb1.key
+# 建議（預設 [TLSv1.1, TLSv1.2, TLSv1.3]）。不接受 TLS 1.1
+server.ssl.supportedProtocols: [ "TLSv1.2", "TLSv1.3" ]
+
+#------------------------------------------------------------------------------
+# 連線 Elasticsearch
+#------------------------------------------------------------------------------
+# 建議（預設 [http://localhost:9200]）。列出所有協調用的節點；Kibana 輪流送出請求，連不上的節點會暫時跳過
+elasticsearch.hosts: [ "https://esc1:9200", "https://esc2:9200", "https://esc3:9200" ]
+# 必要。Kibana 自己的服務帳號（內建使用者 kibana_system），密碼放 keystore 的 elasticsearch.password
+elasticsearch.username: "kibana_system"
+# 必要。簽發 Elasticsearch HTTP 憑證的 CA
+elasticsearch.ssl.certificateAuthorities: [ "/etc/kibana/certs/ca.crt" ]
+# 預設。full = 驗證憑證鏈 + 主機名要在 SAN 裡（所以 hosts 要用憑證上有的名稱）
+elasticsearch.ssl.verificationMode: full
+# 預設（毫秒）。Kibana 等 Elasticsearch 回應的上限；大範圍的儀表板查詢超過就顯示逾時。要調大時先查慢的是哪個查詢
+elasticsearch.requestTimeout: 30000
+# 預設（= requestTimeout）。ping 的逾時
+elasticsearch.pingTimeout: 30000
+# 預設（毫秒）。每個分片的查詢逾時（送給 Elasticsearch 的 timeout 參數），0 = 不限
+elasticsearch.shardTimeout: 30000
+# 預設（毫秒）。啟動時檢查 Elasticsearch 版本相容性的間隔
+elasticsearch.healthCheck.delay: 2500
+# 預設（Infinity）。對每個 Elasticsearch 節點最多開幾條 socket
+elasticsearch.maxSockets: Infinity
+# 預設。最多保留幾條閒置 socket
+elasticsearch.maxIdleSockets: 256
+# 預設。閒置 socket 多久後關閉
+elasticsearch.idleSocketTimeout: "60s"
+# 預設。請求與回應不壓縮；Kibana 和 Elasticsearch 在同一個內網時壓縮只會多耗 CPU
+elasticsearch.compression: false
+# 預設。不在啟動時自動探索節點：sniff 會拿 Elasticsearch 回報的 publish_address（IP）去連，
+# 和 verificationMode: full + 憑證主機名搭配容易出錯，也會把請求送到 master-only 節點
+elasticsearch.sniffOnStart: false
+# 預設。不定期重新探索
+elasticsearch.sniffInterval: false
+# 預設。連線失敗時不重新探索
+elasticsearch.sniffOnConnectionFault: false
+# 預設。轉送給 Elasticsearch 的使用者請求標頭（使用者以自己的身分查詢）
+elasticsearch.requestHeadersWhitelist: [ "authorization", "es-client-authentication" ]
+
+#------------------------------------------------------------------------------
+# 儲存物件（儀表板、視覺化、data view 等，存在 .kibana* 系統索引）
+#------------------------------------------------------------------------------
+# 預設（26214400 = 25 MB）。匯入 ndjson 檔案的大小上限
+savedObjects.maxImportPayloadBytes: 26214400
+# 預設。單次匯入 / 匯出的物件數上限
+savedObjects.maxImportExportSize: 10000
+
+#------------------------------------------------------------------------------
+# 登入工作階段
+#------------------------------------------------------------------------------
+# 預設。閒置多久後要重新登入
+xpack.security.session.idleTimeout: "8h"
+# 預設。不論是否閒置，登入後最長多久要重新登入
+xpack.security.session.lifespan: "30d"
+# 預設。多久清一次 .kibana_security_session 索引裡過期的 session
+xpack.security.session.cleanupInterval: "1h"
+
+#------------------------------------------------------------------------------
+# 背景工作（告警規則、報表、遙測等都由 Task Manager 執行）
+#------------------------------------------------------------------------------
+# 預設。每台 Kibana 同時執行的工作量上限；規則很多、/api/task_manager/_health 顯示積壓時才調大（或加一台 Kibana）
+xpack.task_manager.capacity: 10
+# 預設（毫秒）。多久向 .kibana_task_manager 索引領一次工作
+xpack.task_manager.poll_interval: 3000
+# 預設。告警規則最短的執行間隔，避免有人建立每秒執行的規則壓垮 Elasticsearch
+xpack.alerting.rules.minimumScheduleInterval.value: "1m"
+
+#------------------------------------------------------------------------------
+# 報表（CSV 匯出）
+#------------------------------------------------------------------------------
+# 預設（250 MB）。產生的 CSV 檔大小上限
+xpack.reporting.csv.maxSizeBytes: 262144000
+# 預設。CSV 匯出時每批向 Elasticsearch 取幾筆
+xpack.reporting.csv.scroll.size: 500
+# 預設。每批 scroll / point-in-time 的保留時間
+xpack.reporting.csv.scroll.duration: "30s"
+# 預設。一個報表工作的執行上限
+xpack.reporting.queue.timeout: "4m"
+
+#------------------------------------------------------------------------------
+# 搜尋列的自動完成（輸入欄位值時的建議，每次按鍵都會對 Elasticsearch 查詢）
+#------------------------------------------------------------------------------
+# 預設（毫秒）。自動完成查詢的逾時
+unifiedSearch.autocomplete.valueSuggestions.timeout: 1000
+# 預設。每個分片最多掃描幾筆就停止（資料量大時自動完成仍然很快）
+unifiedSearch.autocomplete.valueSuggestions.terminateAfter: 100000
+
+#------------------------------------------------------------------------------
+# 運維
+#------------------------------------------------------------------------------
+# 預設（毫秒）。收集 Kibana 本身指標（event loop delay、heap、請求數）的間隔，/api/status 的 metrics 來自這裡
+ops.interval: 5000
+# 建議（預設 true）。內網主機不往外回傳使用資料
+telemetry.optIn: false
+# 建議（預設 true）。不讓使用者在畫面上把 telemetry 打開
+telemetry.allowChangingOptInStatus: false
+# 建議（預設 true）。不從外部網站抓新聞（內網連不出去時，畫面會一直等）
+newsfeed.enabled: false
+# 預設。介面語言（內建 en、zh-CN、ja-JP、fr-FR、de-DE，沒有繁體中文）
+i18n.locale: "en"
+# 必要（RPM 預設）
+path.data: /var/lib/kibana
+# 必要（RPM 預設）
+pid.file: /run/kibana/kibana.pid
+
+#------------------------------------------------------------------------------
+# 日誌
+#------------------------------------------------------------------------------
+# 建議（RPM 預設是 type: file，檔案會無限長大）。改成依大小輪替：每個 256 MB、保留 10 個，JSON 格式
+logging:
+  appenders:
+    file:
+      type: rolling-file
+      fileName: /var/log/kibana/kibana.log
+      policy:
+        type: size-limit
+        size: 256mb
+      strategy:
+        type: numeric
+        max: 10
+      layout:
+        type: json
+  root:
+    appenders: [ default, file ]
+    # 預設
+    level: info

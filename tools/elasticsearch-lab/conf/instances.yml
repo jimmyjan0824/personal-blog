@@ -8,3 +8,4 @@ instances:
   - { name: esu2, dns: [ esu2, esu2.lab.local ], ip: [ 192.168.60.32 ] }
   - { name: esu3, dns: [ esu3, esu3.lab.local ], ip: [ 192.168.60.33 ] }
   - { name: esd9, dns: [ esd9, esd9.lab.local ], ip: [ 192.168.60.41 ] }
+  - { name: kb1,  dns: [ kb1,  kb1.lab.local ],  ip: [ 192.168.60.51 ] }
