@@ -165,7 +165,7 @@ GET _cluster/health?wait_for_status=green&timeout=10m
 1. `GET _migration/deprecations` 與 Kibana 的 Upgrade Assistant，**清到沒有 critical**。
 2. 7.x 建立的索引：reindex 或刪除（9.x 只能唯讀）。
 3. 完整快照一份（`include_global_state: true`），這是**唯一的回滾方式**。
-4. 外掛、Kibana、Logstash、Beats、各語言 client 的相容版本。
+4. 外掛、Kibana、Logstash、Beats、各語言 client 的相容版本。Kibana 最後才升、版本要和 Elasticsearch 相同，升級前的快照要包含 `kibana` feature state（Kibana 也不能降版，見[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})）。
 5. 先在測試叢集用正式資料的快照演練一次。
 
 升級順序：**data 節點先、master-eligible 最後**（新版本的 master 不能接受舊版本 data 節點加入，反過來可以）。分層架構則是 frozen → cold → warm → hot → master。每台的步驟和滾動重啟相同，只是把 `systemctl restart` 換成：

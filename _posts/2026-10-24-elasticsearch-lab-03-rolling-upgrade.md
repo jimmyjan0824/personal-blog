@@ -143,7 +143,7 @@ Kibana 的 **Upgrade Assistant** 顯示的就是這個 API 的結果，有 Kiban
 這些在實測環境沒有，正式環境升級前要逐項確認（**未實測**）：
 
 - **用戶端相容性**：9.x 的伺服器接受 8.x 的 REST client（相容模式），但應用程式的 client 函式庫最好在升級後也跟著升；Logstash、Beats、Elastic Agent、Kibana 的版本相容性看官方的 [Product compatibility](https://www.elastic.co/support/matrix#matrix_compatibility)。
-- **Kibana**：Kibana 要在 Elasticsearch 全部升級完之後再升，版本不能比 Elasticsearch 新。
+- **Kibana**：Kibana 要在 Elasticsearch 全部升級完之後再升，版本不能比 Elasticsearch 新；Kibana 第一次啟動就會 migrate `.kibana*` 索引，同樣不能降版（實測見[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})）。
 - **外掛**：每台節點的外掛要在啟動 9.5 之前換成 9.5 的版本，否則啟動失敗。
 - **CCR**：有 follower 叢集時先升 follower（DR）叢集，再升 leader。
 - **磁碟空間**：升級期間副本可能重新分配，每台至少留到低水位以下。
@@ -566,6 +566,8 @@ java.lang.IllegalArgumentException: indexCreatedVersionMajor is in the future: 1
 - RPM 升級會保留改過的設定檔，8.19 的設定檔不改也能以 9.5 啟動；但寫死的舊預設值會跟著留下來。
 - 升級上來的節點要自己在 keystore 補**叢集狀態加密**的密碼，health report 的 green 不代表已經設定好。
 - **Elasticsearch 不能降版**：9.5 第一次啟動就改寫了資料目錄，退路只有升級前的快照。
+
+下一篇：[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})，在三節點叢集旁加一台 Kibana 9.5.5，含完整的 kibana.yml 與故障測試。
 
 ### 參考資料
 

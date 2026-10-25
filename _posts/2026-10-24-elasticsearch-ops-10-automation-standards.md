@@ -223,7 +223,7 @@ resource "elasticstack_elasticsearch_snapshot_lifecycle" "nightly" {
 - 叢集內部的設定（範本、ILM、角色）也是程式碼，放 Git、用 Terraform 或 CI 套用。
 - 命名、mapping、查詢都要有規範，寫進 code review checklist。
 
-這是 Elasticsearch 運維系列的最後一篇。實作的部分請看[單節點]({% post_url 2026-10-24-elasticsearch-lab-01-single-node %})、[三節點 Cluster]({% post_url 2026-10-24-elasticsearch-lab-02-cluster %})、[滾動升級 8.19 → 9.5]({% post_url 2026-10-24-elasticsearch-lab-03-rolling-upgrade %})。
+這是 Elasticsearch 運維系列的最後一篇。實作的部分請看[單節點]({% post_url 2026-10-24-elasticsearch-lab-01-single-node %})、[三節點 Cluster]({% post_url 2026-10-24-elasticsearch-lab-02-cluster %})、[滾動升級 8.19 → 9.5]({% post_url 2026-10-24-elasticsearch-lab-03-rolling-upgrade %})、[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})。
 
 ### 參考資料
 

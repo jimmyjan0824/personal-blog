@@ -237,7 +237,7 @@ GET _cluster/settings?flat_settings
 - heap 用自動值（約 RAM 的 50%），其餘留給 page cache；關 swap、鎖記憶體。
 - Elasticsearch 不認得的設定一律拒絕啟動，`persistent` 叢集設定會蓋過設定檔。
 
-下一篇是三篇實作：[單節點]({% post_url 2026-10-24-elasticsearch-lab-01-single-node %})、[三節點 Cluster]({% post_url 2026-10-24-elasticsearch-lab-02-cluster %})、[滾動升級 8.19 → 9.5]({% post_url 2026-10-24-elasticsearch-lab-03-rolling-upgrade %})。
+下一篇是四篇實作：[單節點]({% post_url 2026-10-24-elasticsearch-lab-01-single-node %})、[三節點 Cluster]({% post_url 2026-10-24-elasticsearch-lab-02-cluster %})、[滾動升級 8.19 → 9.5]({% post_url 2026-10-24-elasticsearch-lab-03-rolling-upgrade %})、[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})。
 
 ### 參考資料
 

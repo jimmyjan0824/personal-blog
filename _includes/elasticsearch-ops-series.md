@@ -1,7 +1,7 @@
 > **Elasticsearch 運維系列**（以 Elasticsearch 9.5 為主，並比較 8.19；撰寫時最新為 9.5.5 / 8.19.23）
 >
 > 1. [安裝部署與環境配置]({% post_url 2026-10-24-elasticsearch-ops-01-installation-config %})
->    - 實作：[單節點]({% post_url 2026-10-24-elasticsearch-lab-01-single-node %})、[三節點 Cluster]({% post_url 2026-10-24-elasticsearch-lab-02-cluster %})、[滾動升級 8.19 → 9.5]({% post_url 2026-10-24-elasticsearch-lab-03-rolling-upgrade %})
+>    - 實作：[單節點]({% post_url 2026-10-24-elasticsearch-lab-01-single-node %})、[三節點 Cluster]({% post_url 2026-10-24-elasticsearch-lab-02-cluster %})、[滾動升級 8.19 → 9.5]({% post_url 2026-10-24-elasticsearch-lab-03-rolling-upgrade %})、[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})
 > 2. [備份與還原]({% post_url 2026-10-24-elasticsearch-ops-02-backup-restore %})
 > 3. [高可用與災難復原]({% post_url 2026-10-24-elasticsearch-ops-03-ha-dr %})
 > 4. [監控與告警]({% post_url 2026-10-24-elasticsearch-ops-04-monitoring %})

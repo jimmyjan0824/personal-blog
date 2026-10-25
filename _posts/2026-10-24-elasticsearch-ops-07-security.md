@@ -99,7 +99,7 @@ GET _ssl/certificates
 | 使用者 | 用途 |
 | :--- | :--- |
 | `elastic` | 超級使用者。**只用來建立其他帳號與緊急處理**，不要給應用程式用 |
-| `kibana_system` | Kibana 連線 Elasticsearch |
+| `kibana_system` | Kibana 連線 Elasticsearch（設定方式見[Kibana 安裝與設定]({% post_url 2026-10-24-elasticsearch-lab-04-kibana %})） |
 | `logstash_system`、`beats_system`、`apm_system`、`remote_monitoring_user` | 各元件的監控資料 |
 
 ```bash
