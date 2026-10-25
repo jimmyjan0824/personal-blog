@@ -1,0 +1,416 @@
+
+======== [db1] 1. 確認目前狀態 ========  (2026-10-25 15:55:14)
+[db1]# rpm -qa | grep -i percona | sort; mysqld --version
+Percona-Server-client-57-5.7.44-48.1.el9.x86_64
+Percona-Server-server-57-5.7.44-48.1.el9.x86_64
+Percona-Server-shared-57-5.7.44-48.1.el9.x86_64
+percona-release-1.0-34.noarch
+mysqld  Ver 5.7.44-48 for Linux on x86_64 (Percona Server (GPL), Release 48, Revision 497f936a373)
+
+[db1] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:1-49
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-49
+                Auto_Position: 1
+
+
+======== [db1] 2. 啟用 ps80 套件庫（會停用 ps57），先只裝 MySQL Shell 跑升級檢查 ========  (2026-10-25 15:55:14)
+[db1]# percona-release setup -y ps80 2>&1 | tail -3; dnf -q --showduplicates list percona-server-server | tail -3
+* Disabling all Percona Repositories
+* Enabling the Percona Server for MySQL 8.0 repository
+<*> All done!
+percona-server-server.x86_64        8.0.44-35.1.el9         ps-80-release-x86_64
+percona-server-server.x86_64        8.0.45-36.1.el9         ps-80-release-x86_64
+percona-server-server.x86_64        8.0.46-37.1.el9         ps-80-release-x86_64
+
+
+======== [db1] 3. 停複製、完整關機（innodb_fast_shutdown = 0）、備份資料目錄與設定 ========  (2026-10-25 15:55:58)
+[db1] mysql> STOP SLAVE; SET GLOBAL innodb_fast_shutdown = 0;
+
+[db1]# time systemctl stop mysqld; tail -3 /var/log/mysqld.log
+
+real	0m2.287s
+user	0m0.027s
+sys	0m0.001s
+2026-10-25T07:56:00.880118Z 0 [Note] Shutting down plugin 'binlog'
+2026-10-25T07:56:00.881330Z 0 [Note] /usr/sbin/mysqld: Shutdown complete
+
+
+[db1]# cp -a /var/lib/mysql /var/lib/mysql-5.7-backup && cp -a /etc/my.cnf.d /root/my.cnf.d-5.7 && du -sh /var/lib/mysql-5.7-backup
+187M	/var/lib/mysql-5.7-backup
+
+
+======== [db1] 4. 移除 5.7 套件、安裝 8.0（資料目錄不會被刪） ========  (2026-10-25 15:56:01)
+[db1]# dnf remove -y "Percona-Server-*-57" 2>&1 | grep -E "^ Percona|Removed|Complete"; ls -l /etc/my.cnf* 2>&1; ls /var/lib/mysql | head -5
+ Percona-Server-client-57   x86_64  5.7.44-48.1.el9          @ps-57-release-x86_64   34 M
+ Percona-Server-server-57   x86_64  5.7.44-48.1.el9          @ps-57-release-x86_64  102 M
+ Percona-Server-shared-57   x86_64  5.7.44-48.1.el9          @ps-57-release-x86_64  3.9 M
+Removed "/etc/systemd/system/multi-user.target.wants/mysqld.service".
+Removed "/etc/systemd/system/mysql.service".
+Removed:
+Complete!
+/etc/my.cnf.d:
+total 8
+-rw-r--r-- 1 root root 1114 Oct 25 07:51 replication.cnf
+-rw-r--r-- 1 root root   64 Oct 25 07:55 server-id.cnf
+
+/etc/my.cnf.d_backup-20261025-0756:
+total 8
+-rw-r--r-- 1 root root 1114 Oct 25 07:51 replication.cnf
+-rw-r--r-- 1 root root   64 Oct 25 07:55 server-id.cnf
+appdb
+auto.cnf
+ca-key.pem
+ca.pem
+client-cert.pem
+
+[db1]# dnf install -y percona-server-server percona-server-client 2>&1 | grep -E "^ percona-server|Complete|Error"; rpm -qa | grep -i percona-server | sort; mysqld --version
+ percona-server-client     x86_64  8.0.46-37.1.el9          ps-80-release-x86_64      3.1 M
+ percona-server-server     x86_64  8.0.46-37.1.el9          ps-80-release-x86_64       59 M
+ percona-server-shared     x86_64  8.0.46-37.1.el9          ps-80-release-x86_64      1.5 M
+Complete!
+percona-server-client-8.0.46-37.1.el9.x86_64
+percona-server-server-8.0.46-37.1.el9.x86_64
+percona-server-shared-8.0.46-37.1.el9.x86_64
+/usr/sbin/mysqld  Ver 8.0.46-37 for Linux on x86_64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
+
+[db1]# ls -l /etc/my.cnf; grep -v "^#" /etc/my.cnf | grep -v "^$"; ls /etc/my.cnf.d
+-rw-r--r-- 1 root root 1286 Jun  4 22:11 /etc/my.cnf
+[mysqld]
+datadir=/var/lib/mysql
+socket=/var/lib/mysql/mysql.sock
+log-error=/var/log/mysqld.log
+pid-file=/var/run/mysqld/mysqld.pid
+replication.cnf
+server-id.cnf
+
+[db1]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf; tail -1 /etc/my.cnf
+!includedir /etc/my.cnf.d
+
+[db1]# cp /root/conf/80-replication.cnf /etc/my.cnf.d/replication.cnf && diff /root/my.cnf.d-5.7/replication.cnf /etc/my.cnf.d/replication.cnf
+1c1,3
+< # /etc/my.cnf.d/replication.cnf（Percona Server 5.7 時期的設定，升級前三台共用；server_id / report_host 另外放 server-id.cnf）
+---
+> # /etc/my.cnf.d/replication.cnf（升級到 Percona Server 8.0 後的版本）
+> # 和 5.7 版的差異：拿掉 query_cache_*、sql_mode 去掉 NO_AUTO_CREATE_USER、expire_logs_days 改 binlog_expire_logs_seconds、
+> # master/relay_log_info_repository 拿掉（8.0 預設就是 TABLE 且已棄用）、slave_* 改成 replica_* 新名稱
+6,7c8,9
+< collation_server         = utf8mb4_general_ci
+< sql_mode                 = ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+---
+> collation_server         = utf8mb4_general_ci   # 保留 5.7 的排序規則（8.0 預設是 utf8mb4_0900_ai_ci），升級後新建的表與舊表一致
+> sql_mode                 = ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+11,14d12
+< # 5.7 常見、但 8.0 已移除的設定
+< query_cache_type         = 0
+< query_cache_size         = 0
+< 
+19c17
+< expire_logs_days         = 7
+---
+> binlog_expire_logs_seconds = 604800
+22,24c20
+< log_slave_updates        = ON
+< master_info_repository   = TABLE
+< relay_log_info_repository = TABLE
+---
+> log_replica_updates      = ON
+27,29c23,25
+< slave_parallel_type      = LOGICAL_CLOCK
+< slave_parallel_workers   = 4
+< slave_preserve_commit_order = ON
+---
+> replica_parallel_type    = LOGICAL_CLOCK
+> replica_parallel_workers = 4
+> replica_preserve_commit_order = ON
+
+[db1]# mysqld --validate-config --user=mysql; echo "exit=$?"
+2026-10-25T07:56:30.834658Z 0 [Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
+2026-10-25T07:56:30.834779Z 0 [Warning] [MY-011069] [Server] The syntax '--replica-parallel-type' is deprecated and will be removed in a future release.
+2026-10-25T07:56:30.836034Z 0 [Warning] [MY-010097] [Server] Insecure configuration for --secure-log-path: Current value does not restrict location of generated files. Consider setting it to a valid, non-empty path.
+exit=0
+
+
+======== [db1] 7. 啟動 8.0：第一次啟動自動升級資料字典與系統表（8.0.16 起不用 mysql_upgrade） ========  (2026-10-25 15:56:30)
+[db1]# time systemctl start mysqld; systemctl is-active mysqld
+
+real	0m3.924s
+user	0m0.025s
+sys	0m0.002s
+active
+
+[db1]# grep -E "Server upgrade|upgrad|Data dictionary|ready for connections|\[ERROR\]" /var/log/mysqld.log | tail -15
+2026-10-25T07:51:21.806249Z 0 [Note] /usr/sbin/mysqld: ready for connections.
+2026-10-25T07:56:31.444537Z 1 [System] [MY-011012] [Server] Starting upgrade of data directory.
+2026-10-25T07:56:32.726364Z 5 [System] [MY-013381] [Server] Server upgrade from '50700' to '80046' started.
+2026-10-25T07:56:34.779445Z 5 [System] [MY-013381] [Server] Server upgrade from '50700' to '80046' completed.
+2026-10-25T07:56:34.890935Z 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '8.0.46-37'  socket: '/var/lib/mysql/mysql.sock'  port: 3306  Percona Server (GPL), Release 37, Revision 39e2b60e.
+2026-10-25T07:56:34.891260Z 0 [System] [MY-011323] [Server] X Plugin ready for connections. Bind-address: '::' port: 33060, socket: /var/lib/mysql/mysqlx.sock
+
+[db1] mysql> SELECT @@hostname, @@server_id, @@version, @@gtid_mode, @@super_read_only, @@collation_server, @@replica_parallel_workers\G
+*************************** 1. row ***************************
+                @@hostname: db1
+               @@server_id: 1
+                 @@version: 8.0.46-37
+               @@gtid_mode: ON
+         @@super_read_only: 1
+        @@collation_server: utf8mb4_general_ci
+@@replica_parallel_workers: 4
+
+[db1]# sleep 3
+
+[db1] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:183-301
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-301
+                Auto_Position: 1
+
+[db1] mysql> SELECT CHANNEL_NAME, SERVICE_STATE, LAST_ERROR_MESSAGE FROM performance_schema.replication_connection_status;
++--------------+---------------+--------------------+
+| CHANNEL_NAME | SERVICE_STATE | LAST_ERROR_MESSAGE |
++--------------+---------------+--------------------+
+|              | ON            |                    |
++--------------+---------------+--------------------+
+
+[db1] mysql> SELECT user, host, plugin FROM mysql.user WHERE user IN ('repl','app','root');
++------+--------------+-----------------------+
+| user | host         | plugin                |
++------+--------------+-----------------------+
+| app  | 192.168.57.% | mysql_native_password |
+| repl | 192.168.57.% | mysql_native_password |
+| root | localhost    | mysql_native_password |
++------+--------------+-----------------------+
+
+[db1] mysql> SELECT TABLE_NAME, ENGINE, TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA='appdb' ORDER BY 1;
++----------------+--------+--------------------+
+| TABLE_NAME     | ENGINE | TABLE_COLLATION    |
++----------------+--------+--------------------+
+| t_after_switch | InnoDB | utf8mb4_general_ci |
+| t_legacy       | InnoDB | utf8mb3_general_ci |
+| t_myisam       | MyISAM | utf8mb4_general_ci |
+| t_orders       | InnoDB | utf8mb4_general_ci |
+| t_rank         | InnoDB | utf8mb4_general_ci |
++----------------+--------+--------------------+
+
+[db1] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603,df5e7840-d048-11f1-9a41-56e611d96467:1-303', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.0.46-37 |     5890 | 12612096442897 |
++------+-----------+----------+----------------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.0.46-37 |     5890 | 12612096442897 |
++------+-----------+----------+----------------+
+
+
+======== 三台都是 8.0 ========  (2026-10-25 15:56:40)
+[db1] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db1        | 8.0.46-37 |           1 |                 1 |
++------------+-----------+-------------+-------------------+
+
+[db2] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db2        | 8.0.46-37 |           0 |                 0 |
++------------+-----------+-------------+-------------------+
+
+[db3] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db3        | 8.0.46-37 |           1 |                 1 |
++------------+-----------+-------------+-------------------+
+
+[db2] mysql> SHOW REPLICAS;
++-----------+------+------+-----------+--------------------------------------+
+| Server_Id | Host | Port | Source_Id | Replica_UUID                         |
++-----------+------+------+-----------+--------------------------------------+
+|         1 | db1  | 3306 |         2 | dce89f70-d048-11f1-9b4c-82a31f054add |
+|         3 | db3  | 3306 |         2 | e1d68439-d048-11f1-9a4a-b21f06a1499f |
++-----------+------+------+-----------+--------------------------------------+
+
+[db1] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:183-304
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-304
+                Auto_Position: 1
+
+[db3] mysql> SHOW SLAVE STATUS\G   （節錄）
+                  Master_Host: db2
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Master: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: df5e7840-d048-11f1-9a41-56e611d96467:1-305
+            Executed_Gtid_Set: dce89f70-d048-11f1-9b4c-82a31f054add:1-603,
+df5e7840-d048-11f1-9a41-56e611d96467:1-305
+                Auto_Position: 1
+
+[db1] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603,df5e7840-d048-11f1-9a41-56e611d96467:1-305', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603,df5e7840-d048-11f1-9a41-56e611d96467:1-305', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.0.46-37 |     5892 | 12618375119959 |
++------+-----------+----------+----------------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.0.46-37 |     5892 | 12618375119959 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.0.46-37 |     5892 | 12618375119959 |
++------+-----------+----------+----------------+
+
+
+======== 停止 app 寫入，核對每一筆成功的寫入都在資料庫裡 ========  (2026-10-25 15:56:43)
+[app]# touch /tmp/writer.stop; sleep 2; echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; grep " ERR " /tmp/writer.log | cut -d" " -f3- | sort | uniq -c
+OK=892 ERR=2
+      2 db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+
+[db2] mysql> SELECT src, COUNT(*) FROM appdb.t_orders WHERE note LIKE 'w-%' GROUP BY src;
++------+----------+
+| src  | COUNT(*) |
++------+----------+
+| db1  |      589 |
+| db2  |      303 |
++------+----------+
+
+[db1] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603,df5e7840-d048-11f1-9a41-56e611d96467:1-305', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('dce89f70-d048-11f1-9b4c-82a31f054add:1-603,df5e7840-d048-11f1-9a41-56e611d96467:1-305', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.0.46-37 |     5892 | 12618375119959 |
++------+-----------+----------+----------------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.0.46-37 |     5892 | 12618375119959 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.0.46-37 |     5892 | 12618375119959 |
++------+-----------+----------+----------------+
+
+
+======== 升級後的 8.0 仍有的 5.7 遺留，清理建議 ========  (2026-10-25 15:56:47)
+[db2] mysql> SELECT TABLE_NAME, ENGINE, TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA='appdb' ORDER BY 1;
++----------------+--------+--------------------+
+| TABLE_NAME     | ENGINE | TABLE_COLLATION    |
++----------------+--------+--------------------+
+| t_after_switch | InnoDB | utf8mb4_general_ci |
+| t_legacy       | InnoDB | utf8mb3_general_ci |
+| t_myisam       | MyISAM | utf8mb4_general_ci |
+| t_orders       | InnoDB | utf8mb4_general_ci |
+| t_rank         | InnoDB | utf8mb4_general_ci |
++----------------+--------+--------------------+
+
+[db2] mysql> SELECT user, host, plugin FROM mysql.user WHERE user IN ('repl','app','root');
++------+--------------+-----------------------+
+| user | host         | plugin                |
++------+--------------+-----------------------+
+| app  | 192.168.57.% | mysql_native_password |
+| repl | 192.168.57.% | mysql_native_password |
+| root | localhost    | mysql_native_password |
++------+--------------+-----------------------+
+
+[db2]# ls -d /var/lib/mysql-5.7-backup; du -sh /var/lib/mysql-5.7-backup
+/var/lib/mysql-5.7-backup
+123M	/var/lib/mysql-5.7-backup
+

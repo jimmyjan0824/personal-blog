@@ -1,0 +1,29 @@
+# /etc/my.cnf.d/replication.cnf（Percona Server 5.7 時期的設定，升級前三台共用；server_id / report_host 另外放 server-id.cnf）
+[mysqld]
+bind_address             = 0.0.0.0
+skip_name_resolve        = ON
+character_set_server     = utf8mb4
+collation_server         = utf8mb4_general_ci
+sql_mode                 = ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+innodb_buffer_pool_size  = 256M
+innodb_flush_log_at_trx_commit = 1
+
+# 5.7 常見、但 8.0 已移除的設定
+query_cache_type         = 0
+query_cache_size         = 0
+
+# ---- Binlog / GTID ----
+log_bin                  = mysql-bin
+binlog_format            = ROW
+sync_binlog              = 1
+expire_logs_days         = 7
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+log_slave_updates        = ON
+master_info_repository   = TABLE
+relay_log_info_repository = TABLE
+relay_log                = relay-bin
+relay_log_recovery       = ON
+slave_parallel_type      = LOGICAL_CLOCK
+slave_parallel_workers   = 4
+slave_preserve_commit_order = ON
