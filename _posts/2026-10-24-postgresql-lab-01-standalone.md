@@ -16,7 +16,7 @@ description: 在 Rocky Linux 9 上用 PGDG 套件庫安裝 PostgreSQL 17.11，�
 
 | 主機 | IP | 角色 |
 | :--- | :--- | :--- |
-| `pg1` | 192.168.59.11 | PostgreSQL 17 Standalone（port 5432） |
+| `pg1` | 192.168.0.1 | PostgreSQL 17 Standalone（port 5432） |
 
 規劃的主機規格：16 GB RAM、8 vCPU、SSD，專門跑 PostgreSQL；用途是 **OLTP 為主**的應用程式資料庫，連線數上限 200（更多連線用 PgBouncer）。
 
@@ -311,7 +311,7 @@ sudo -u postgres tee /var/lib/pgsql/17/data/postgresql.conf >/dev/null <<'CONF'
 # 連線
 #------------------------------------------------------------------------------
 # 建議（預設 localhost）。只聽內網 IP 與本機，需重啟
-listen_addresses = '192.168.59.11, localhost'
+listen_addresses = '192.168.0.1, localhost'
 # 預設，需重啟
 port = 5432
 # 建議（預設 100）。每條連線是一個行程、約占 5~10 MB；連線需求大時前面加 PgBouncer，不要無限制調高，需重啟
@@ -793,12 +793,12 @@ host    replication     all             ::1/128                 scram-sha-256
 **應用程式網段怎麼寫**
 
 - 上面的範例允許 `192.168.0.1`～`192.168.0.254`（MySQL 寫法的 `192.168.0.%`）連線。pg_hba.conf **不支援 `%` 萬用字元**，要寫成 CIDR：`192.168.0.0/24`，或寫成兩欄 `192.168.0.0  255.255.255.0`。
-- 常見的對照：`192.168.%`（MySQL）→ `192.168.0.0/16`；單一主機 → `/32`。
-- 本文的實測環境是 `192.168.59.0/24`，所以後面的實測輸出裡，連線來源都是 `192.168.59.x`。
+- 常見的對照：`192.168.0.%`（MySQL）→ `192.168.0.0/24`；單一主機 → `/32`。
+- 本文的實測環境是 `192.168.0.1/24`，所以後面的實測輸出裡，連線來源都是 `192.168.0.x`。
 
 **改完要檢查兩件事**
 
-1. `listen_addresses` 要包含用戶端會連的那張網卡 IP。本文設定檔是 `'192.168.59.11, localhost'`，要改成主機自己的 IP（或 `'*'`）。這個參數**要重啟**才會生效，reload 沒有用：
+1. `listen_addresses` 要包含用戶端會連的那張網卡 IP。本文設定檔是 `'192.168.0.1, localhost'`，要改成主機自己的 IP（或 `'*'`）。這個參數**要重啟**才會生效，reload 沒有用：
 
    ```bash
    sudo systemctl restart postgresql-17
@@ -893,7 +893,7 @@ Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.servic
 [pg1]# ls /var/lib/pgsql/17/data/log/; cat /var/lib/pgsql/17/data/log/postgresql-*.log
 postgresql-2026-10-24.log
 2026-10-24 15:18:36.397 CST [767] LOG:  starting PostgreSQL 17.11 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit
-2026-10-24 15:18:36.397 CST [767] LOG:  listening on IPv4 address "192.168.59.11", port 5432
+2026-10-24 15:18:36.397 CST [767] LOG:  listening on IPv4 address "192.168.0.1", port 5432
 2026-10-24 15:18:36.398 CST [767] LOG:  listening on IPv6 address "::1", port 5432
 2026-10-24 15:18:36.398 CST [767] LOG:  listening on IPv4 address "127.0.0.1", port 5432
 2026-10-24 15:18:36.398 CST [767] LOG:  listening on Unix socket "/run/postgresql/.s.PGSQL.5432"
@@ -976,7 +976,7 @@ postgresql-2026-10-24.log
 --- 標「建議」的參數：實際值與預設值（boot_val，單位見 unit）
                 name                 |                                   setting                                    |            boot_val            | unit 
 -------------------------------------+------------------------------------------------------------------------------+--------------------------------+------
- listen_addresses                    | 192.168.59.11, localhost                                                     | localhost                      | 
+ listen_addresses                    | 192.168.0.1, localhost                                                       | localhost                      | 
  max_connections                     | 200                                                                          | 100                            | 
  tcp_keepalives_idle                 | 0                                                                            | 0                              | s
  tcp_keepalives_interval             | 0                                                                            | 0                              | s
@@ -1067,10 +1067,10 @@ CREATE EXTENSION
 (1 row)
 
 
-[pg1]# PGPASSWORD=ChangeMe_App_2026 psql -X -h 192.168.59.11 -U app -d appdb -c "SELECT current_user, inet_server_addr(), ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+[pg1]# PGPASSWORD=ChangeMe_App_2026 psql -X -h 192.168.0.1 -U app -d appdb -c "SELECT current_user, inet_server_addr(), ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
  current_user | inet_server_addr | ssl 
 --------------+------------------+-----
- app          | 192.168.59.11    | f
+ app          | 192.168.0.1      | f
 (1 row)
 
 
@@ -1297,18 +1297,18 @@ x-node: &node
   volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro", "./bin:/root/bin:ro"]
   tmpfs: ["/run", "/run/lock"]
   extra_hosts:
-    - "pg1:192.168.59.11"
-    - "pgs1:192.168.59.21"
-    - "pgs2:192.168.59.22"
-    - "pgs3:192.168.59.23"
+    - "pg1:192.168.0.1"
+    - "pgs1:192.168.0.21"
+    - "pgs2:192.168.0.22"
+    - "pgs3:192.168.0.23"
 services:
-  pg1:  { <<: *node, image: pglab-rocky9-base, hostname: pg1,  networks: { labnet: { ipv4_address: 192.168.59.11 } } }
-  pgs1: { <<: *node, hostname: pgs1, networks: { labnet: { ipv4_address: 192.168.59.21 } } }
-  pgs2: { <<: *node, hostname: pgs2, networks: { labnet: { ipv4_address: 192.168.59.22 } } }
-  pgs3: { <<: *node, hostname: pgs3, networks: { labnet: { ipv4_address: 192.168.59.23 } } }
+  pg1:  { <<: *node, image: pglab-rocky9-base, hostname: pg1,  networks: { labnet: { ipv4_address: 192.168.0.1 } } }
+  pgs1: { <<: *node, hostname: pgs1, networks: { labnet: { ipv4_address: 192.168.0.21 } } }
+  pgs2: { <<: *node, hostname: pgs2, networks: { labnet: { ipv4_address: 192.168.0.22 } } }
+  pgs3: { <<: *node, hostname: pgs3, networks: { labnet: { ipv4_address: 192.168.0.23 } } }
 networks:
   labnet:
-    ipam: { config: [ { subnet: 192.168.59.0/24 } ] }
+    ipam: { config: [ { subnet: 192.168.0.0/24, gateway: 192.168.0.254 } ] }
 ```
 
 想自己重現的話，把 `tools/postgresql-lab` 整個資料夾複製下來，依序執行 `./00-build.sh`、`./10-standalone.sh`（Streaming Replication 是 `20-`，17 vs 18 的補充驗證是 `30-`），輸出會記錄在 `results/`。
