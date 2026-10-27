@@ -536,7 +536,7 @@ sudo systemctl enable --now postgresql-17
 Initializing database ... OK
 
 
-[pgs1]# install -o postgres -g postgres -m 600 /root/conf/postgresql-streaming.conf /var/lib/pgsql/17/data/postgresql.conf && install -o postgres -g postgres -m 600 /root/conf/pg_hba-streaming.conf /var/lib/pgsql/17/data/pg_hba.conf && systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+[pgs1]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
 Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
 active
 

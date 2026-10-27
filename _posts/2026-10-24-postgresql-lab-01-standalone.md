@@ -34,7 +34,7 @@ sudo sysctl -p /etc/sysctl.d/99-postgresql.conf
 ```
 
 ```console
-[pg1]# cp /root/conf/99-postgresql.conf /etc/sysctl.d/99-postgresql.conf && sysctl -p /etc/sysctl.d/99-postgresql.conf
+[pg1]# sysctl -p /etc/sysctl.d/99-postgresql.conf
 vm.swappiness = 1
 vm.dirty_background_bytes = 67108864
 vm.dirty_bytes = 536870912
@@ -842,13 +842,10 @@ sudo ls -l /var/lib/pgsql/17/data/pg_hba.conf
 
    `error` 欄位全部是空的才算正確。然後從 `192.168.0.x` 的用戶端實際連線一次：`psql -h <主機 IP> -U app -d appdb`。
 
-```console
-[pg1]# cd /var/lib/pgsql/17/data && cp postgresql.conf postgresql.conf.initdb && cp pg_hba.conf pg_hba.conf.initdb && install -o postgres -g postgres -m 600 /root/conf/postgresql-standalone.conf postgresql.conf && install -o postgres -g postgres -m 600 /root/conf/pg_hba-standalone.conf pg_hba.conf && ls -l postgresql.conf pg_hba.conf
--rw------- 1 postgres postgres  1053 Oct 24 07:18 pg_hba.conf
--rw------- 1 postgres postgres 16260 Oct 24 07:18 postgresql.conf
+最後確認兩個檔案的擁有者是 `postgres`、權限是 `-rw-------`，而且 initdb 的備份都在：
 
-[pg1]# grep -Ev "^\s*(#|$)" /var/lib/pgsql/17/data/postgresql.conf | wc -l
-143
+```bash
+sudo ls -l /var/lib/pgsql/17/data/{postgresql,pg_hba}.conf*
 ```
 
 ## 步驟 4：systemd
