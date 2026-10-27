@@ -1005,88 +1005,66 @@ psql -h 192.168.0.1 -U postgres -d postgres     # 從 192.168.0.0/24 網段的�
 - `wal_buffers` 的 `-1` 自動算成 `2048 × 8kB = 16MB`（shared_buffers 的 1/32，上限 16MB）。
 - `huge_pages_status = off`：容器內沒有 Huge Pages，`try` 退回一般記憶體。
 
-### 設定檔與實際值比對
+### 查看參數值
 
-```console
-[pg1]# /root/bin/checkconf.sh /var/lib/pgsql/17/data/postgresql.conf
---- pg_file_settings：沒有套用或有錯誤的設定（空的代表全部套用）
- sourceline | name | setting | applied | error 
-------------+------+---------+---------+-------
-(0 rows)
+MySQL 用 `SHOW VARIABLES LIKE 'max_connections';`，PostgreSQL 有下面幾種寫法，都在 psql 裡執行（`sudo -u postgres psql`）：
 
---- 設定檔參數數量與標記
-  tag   | count 
---------+-------
- initdb |     6
- 建議   |    46
- 預設   |    91
-(3 rows)
+| 想做的事 | PostgreSQL | 對應的 MySQL |
+| :--- | :--- | :--- |
+| 看單一參數 | `SHOW max_connections;` | `SHOW VARIABLES LIKE 'max_connections';` |
+| 看全部參數 | `SHOW ALL;` | `SHOW VARIABLES;` |
+| 模糊搜尋 | `\dconfig *mem*`（psql 15 起） | `SHOW VARIABLES LIKE '%mem%';` |
+| 在 SQL 裡取值 | `SELECT current_setting('work_mem');` | `SELECT @@max_connections;` |
+| 看單位、來源、是否待重啟 | 查 `pg_settings` | `performance_schema.variables_info` |
 
---- 需要確認的項目（CHECK）；UNKNOWN 代表這個版本沒有這個參數
- line | tag  |          name           | setting | boot_val | unit |       source       |    result     
-------+------+-------------------------+---------+----------+------+--------------------+---------------
-   25 | 建議 | tcp_keepalives_idle     | 0       | 0        | s    | configuration file | CHECK
-   27 | 建議 | tcp_keepalives_interval | 0       | 0        | s    | configuration file | CHECK
-   29 | 建議 | tcp_keepalives_count    | 0       | 0        |      | configuration file | CHECK
-  154 | 預設 | wal_buffers             | 2048    | -1       | 8kB  | override           | CHECK(source)
-(4 rows)
+```sql
+-- 單一參數：直接顯示帶單位的值
+SHOW shared_buffers;
+SHOW max_connections;
 
---- 標「建議」的參數：實際值與預設值（boot_val，單位見 unit）
-                name                 |                                   setting                                    |            boot_val            | unit 
--------------------------------------+------------------------------------------------------------------------------+--------------------------------+------
- listen_addresses                    | 192.168.0.1, localhost                                                       | localhost                      | 
- max_connections                     | 200                                                                          | 100                            | 
- tcp_keepalives_idle                 | 0                                                                            | 0                              | s
- tcp_keepalives_interval             | 0                                                                            | 0                              | s
- tcp_keepalives_count                | 0                                                                            | 0                              | 
- shared_buffers                      | 524288                                                                       | 16384                          | 8kB
- work_mem                            | 16384                                                                        | 4096                           | kB
- maintenance_work_mem                | 1048576                                                                      | 65536                          | kB
- temp_file_limit                     | 20971520                                                                     | -1                             | kB
- effective_io_concurrency            | 200                                                                          | 1                              | 
- maintenance_io_concurrency          | 200                                                                          | 10                             | 
- max_worker_processes                | 16                                                                           | 8                              | 
- max_parallel_workers_per_gather     | 4                                                                            | 2                              | 
- max_parallel_maintenance_workers    | 4                                                                            | 2                              | 
- wal_compression                     | lz4                                                                          | off                            | 
- checkpoint_timeout                  | 900                                                                          | 300                            | s
- max_wal_size                        | 8192                                                                         | 1024                           | MB
- min_wal_size                        | 2048                                                                         | 80                             | MB
- archive_mode                        | on                                                                           | off                            | 
- archive_command                     | test ! -f /var/lib/pgsql/17/archive/%f && cp %p /var/lib/pgsql/17/archive/%f |                                | 
- max_slot_wal_keep_size              | 51200                                                                        | -1                             | MB
- random_page_cost                    | 1.1                                                                          | 4                              | 
- effective_cache_size                | 1572864                                                                      | 524288                         | 8kB
- jit                                 | off                                                                          | on                             | 
- logging_collector                   | on                                                                           | off                            | 
- log_filename                        | postgresql-%Y-%m-%d.log                                                      | postgresql-%Y-%m-%d_%H%M%S.log | 
- log_rotation_size                   | 0                                                                            | 10240                          | kB
- log_truncate_on_rotation            | on                                                                           | off                            | 
- log_min_duration_statement          | 1000                                                                         | -1                             | ms
- log_lock_waits                      | on                                                                           | off                            | 
- log_temp_files                      | 0                                                                            | -1                             | kB
- log_autovacuum_min_duration         | 1000                                                                         | 600000                         | ms
- log_line_prefix                     | %m [%p] %q%u@%d/%a %h                                                        | %m [%p]                        | 
- log_timezone                        | Asia/Taipei                                                                  | GMT                            | 
- track_io_timing                     | on                                                                           | off                            | 
- track_wal_io_timing                 | on                                                                           | off                            | 
- track_functions                     | pl                                                                           | none                           | 
- track_activity_query_size           | 4096                                                                         | 1024                           | B
- shared_preload_libraries            | pg_stat_statements                                                           |                                | 
- autovacuum_max_workers              | 4                                                                            | 3                              | 
- autovacuum_vacuum_scale_factor      | 0.05                                                                         | 0.2                            | 
- autovacuum_analyze_scale_factor     | 0.05                                                                         | 0.1                            | 
- autovacuum_vacuum_cost_limit        | 2000                                                                         | -1                             | 
- idle_in_transaction_session_timeout | 600000                                                                       | 0                              | ms
- default_toast_compression           | lz4                                                                          | pglz                           | 
- timezone                            | Asia/Taipei                                                                  | GMT                            | 
-(46 rows)
+-- 模糊搜尋（psql 15 起的 meta-command，支援萬用字元 *）
+\dconfig *mem*
+\dconfig+ max_*        -- 加 + 會多顯示型別、生效層級（context）
+
+-- 在 SQL 裡用（例如寫進監控查詢）
+SELECT current_setting('work_mem'), current_setting('max_connections')::int;
+
+-- 最完整：pg_settings，可以用 LIKE / ILIKE 篩選
+SELECT name, setting, unit, source, sourcefile, sourceline, pending_restart
+FROM pg_settings
+WHERE name ILIKE '%work_mem%'
+ORDER BY name;
 ```
 
-- `pg_file_settings` 沒有任何錯誤或未套用的設定。
-- 標「預設」的 91 個參數，實際值全部等於 17.11 的編譯預設值；`wal_buffers` 的 source 是 `override`，因為 `-1` 會被自動換算，屬正常。
-- 標「建議」的 46 個參數都和預設值不同（表格的最後一段）。
-- `tcp_keepalives_*` 顯示 0 不是設定沒生效：檢查腳本透過 Unix socket 連線，這三個參數只對 TCP 連線有意義，socket 連線上永遠是 0。改用 TCP 連線查詢就是設定值：
+`pg_settings` 幾個常用欄位：
+
+| 欄位 | 意義 |
+| :--- | :--- |
+| `setting` / `unit` | 實際值與單位。`shared_buffers` 的 `setting` 是 `524288`、`unit` 是 `8kB`，也就是 4GB；用 `SHOW` 看會直接顯示 `4GB` |
+| `boot_val` | 編譯預設值 |
+| `source` / `sourcefile` / `sourceline` | 這個值從哪裡來：`default`、`configuration file`（含檔名與行號）、`database`、`user`、`session` 等 |
+| `context` | 怎麼生效：`postmaster` 要重啟、`sighup` reload 即可、`user` / `superuser` 可以在 session 裡 `SET` |
+| `pending_restart` | 設定檔已經改了，但要重啟才會生效 |
+
+改完設定檔、reload 之後，常用的兩個檢查：
+
+```sql
+-- 設定檔有沒有寫錯（參數名稱打錯、值不合法）；空的才是正確
+SELECT sourcefile, sourceline, name, setting, error
+FROM pg_file_settings
+WHERE error IS NOT NULL;
+
+-- 哪些參數已經改了，但還要重啟才會生效（例如 shared_buffers、max_connections）
+SELECT name, setting, unit FROM pg_settings WHERE pending_restart;
+
+-- 哪些參數不是預設值（等於看這台主機調過什麼）
+SELECT name, setting, unit, source
+FROM pg_settings
+WHERE source NOT IN ('default', 'override')
+ORDER BY name;
+```
+
+**注意 `tcp_keepalives_*`**：用 `sudo -u postgres psql`（Unix socket）連線時，`SHOW tcp_keepalives_idle;` 一定是 `0`，因為這三個參數只對 TCP 連線有意義。要看設定值，請用 TCP 連線查詢：
 
 ```console
 [pg1]# PGPASSWORD=ChangeMe_App_2026 psql -X -h 127.0.0.1 -U app -d appdb -Atc "SELECT name, setting FROM pg_settings WHERE name LIKE 'tcp_keepalives%' ORDER BY 1"

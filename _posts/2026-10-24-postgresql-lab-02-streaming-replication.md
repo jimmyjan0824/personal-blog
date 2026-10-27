@@ -529,7 +529,7 @@ HBA
 sudo systemctl enable --now postgresql-17
 ```
 
-設定檔載入結果（`pg_file_settings` 沒有錯誤；標「預設」的 101 個參數實際值全部等於編譯預設值，標「建議」的 48 個全部不同；`tcp_keepalives_*` 為 0 是因為檢查腳本走 Unix socket，見 Standalone 篇）：
+實測的啟動結果：
 
 ```console
 [pgs1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb
@@ -539,30 +539,16 @@ Initializing database ... OK
 [pgs1]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
 Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
 active
-
-[pgs1]# /root/bin/checkconf.sh /var/lib/pgsql/17/data/postgresql.conf
---- pg_file_settings：沒有套用或有錯誤的設定（空的代表全部套用）
- sourceline | name | setting | applied | error 
-------------+------+---------+---------+-------
-(0 rows)
-
---- 設定檔參數數量與標記
-  tag   | count 
---------+-------
- initdb |     6
- 建議   |    48
- 預設   |   101
-(3 rows)
-
---- 需要確認的項目（CHECK）；UNKNOWN 代表這個版本沒有這個參數
- line | tag  |          name           | setting | boot_val | unit |       source       |    result     
-------+------+-------------------------+---------+----------+------+--------------------+---------------
-   26 | 建議 | tcp_keepalives_idle     | 0       | 0        | s    | configuration file | CHECK
-   28 | 建議 | tcp_keepalives_interval | 0       | 0        | s    | configuration file | CHECK
-   30 | 建議 | tcp_keepalives_count    | 0       | 0        |      | configuration file | CHECK
-  155 | 預設 | wal_buffers             | 2048    | -1       | 8kB  | override           | CHECK(source)
-(4 rows)
 ```
+
+啟動後確認設定檔沒有錯誤、也沒有待重啟的參數（查詢方式見 [Standalone 篇「查看參數值」]({% post_url 2026-10-24-postgresql-lab-01-standalone %}#查看參數值)）：
+
+```bash
+sudo -u postgres psql -X -c "SELECT sourcefile, sourceline, name, error FROM pg_file_settings WHERE error IS NOT NULL;"
+sudo -u postgres psql -X -c "SELECT name, setting FROM pg_settings WHERE pending_restart;"
+```
+
+兩個查詢都回傳 `(0 rows)` 才正確。
 
 ## 步驟 2：複製帳號與 pg_rewind 帳號
 
