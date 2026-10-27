@@ -931,6 +931,39 @@ postgresql-2026-10-24.log
 
 ## 步驟 5：驗證
 
+### 登入資料庫
+
+**initdb 之後 `postgres` 帳號沒有預設密碼**（PGDG 的 `postgresql-17-setup initdb` 不會設定密碼）。依照上面的 pg_hba.conf，作業系統的 `postgres` 帳號從本機 Unix socket 登入走 `peer` 認證，不需要密碼：
+
+```bash
+sudo -u postgres psql            # 直接進 psql
+# 或先切換成 postgres 帳號再執行
+sudo -iu postgres
+psql
+```
+
+進入後提示字元是 `postgres=#`，本文的輸出寫成 `[pg1] postgres=#`。用 `\q` 離開。
+
+要透過 TCP 登入（`-h`），就一定要密碼（pg_hba.conf 的 `host` 規則都是 `scram-sha-256`）。先在 psql 裡幫 `postgres` 設定密碼：
+
+```sql
+-- 互動式輸入，密碼不會留在 shell history 或日誌裡（建議）
+\password postgres
+-- 或直接用 SQL（密碼會出現在 psql history，log_statement 設成 ddl 或 all 時也會記到日誌）
+ALTER ROLE postgres PASSWORD 'ChangeMe_Postgres_2026';
+```
+
+`password_encryption = scram-sha-256`（預設），所以存進去的是 SCRAM 雜湊。設定之後就可以透過 TCP 登入：
+
+```bash
+psql -h 127.0.0.1 -U postgres -d postgres       # 本機 TCP
+psql -h 192.168.0.1 -U postgres -d postgres     # 從 192.168.0.0/24 網段的主機連線
+```
+
+- 從應用程式網段用 `postgres` 登入，在 pg_hba.conf 裡符合 `host all all 192.168.0.0/24 scram-sha-256`，設了密碼就能連。但 `postgres` 是 superuser，**不建議給應用程式或遠端日常使用**，應用程式改用專屬帳號（本文後面建立的 `app`，見「locale、帳號、認證」）。
+- 如果完全不想讓 `postgres` 從網路登入，可以在應用網段那一行**之前**加一行 `host all postgres 0.0.0.0/0 reject`，`postgres` 就只能從本機登入（Unix socket 或 127.0.0.1）。
+- 不想每次輸入密碼可以用 `~/.pgpass`（權限 `600`），格式是 `主機:port:資料庫:帳號:密碼`。
+
 ### 版本與關鍵參數
 
 ```console
