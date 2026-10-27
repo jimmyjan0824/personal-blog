@@ -16,25 +16,30 @@ description: 在 Rocky Linux 9 上建立 PostgreSQL 17.11 一主兩從的 Stream
 
 | 主機 | IP | 角色（初始） | 角色（切換測試後） |
 | :--- | :--- | :--- | :--- |
-| `pgs1` | 192.168.0.1 | 主庫 | 從庫（pg_rewind 後回歸） |
-| `pgs2` | 192.168.0.2 | 從庫（quorum 同步） | **主庫** |
-| `pgs3` | 192.168.0.3 | 從庫（quorum 同步） | 從庫（改接 pgs2） |
+| `STS-DB32-1` | 192.168.0.1 | 主庫 | 從庫（pg_rewind 後回歸） |
+| `STS-DB32-2` | 192.168.0.2 | 從庫（quorum 同步） | **主庫** |
+| `STS-DB32-3` | 192.168.0.3 | 從庫（quorum 同步） | 從庫（改接 STS-DB32-2） |
 
-IP 請換成自己環境的實際位址（pg_hba.conf 的複製規則也要跟著改）。後面的指令用主機名稱 `pgs1`～`pgs3` 互連，三台的 `/etc/hosts` 都要能解析（**未實測**）：
+IP 請換成自己環境的實際位址（pg_hba.conf 的複製規則也要跟著改）。後面的指令用主機名稱 `STS-DB32-1`～`STS-DB32-3` 互連，三台的 `/etc/hosts` 都要能解析（**未實測**）：
 
 ```bash
 sudo tee -a /etc/hosts >/dev/null <<'HOSTS'
-192.168.0.1   pgs1
-192.168.0.2   pgs2
-192.168.0.3   pgs3
+192.168.0.1   STS-DB32-1
+192.168.0.2   STS-DB32-2
+192.168.0.3   STS-DB32-3
 HOSTS
 ```
 
+主機名稱裡有大寫和 `-`，命名時要注意兩條規則：
+
+- **replication slot 名稱只能用小寫英文、數字與底線**，所以 slot 名稱用 `sts_db32_1`～`sts_db32_3`，不能直接用主機名稱。
+- `application_name` 可以直接用主機名稱，但寫進 `synchronous_standby_names` 時，含 `-` 的名稱要用**雙引號**括起來，例如 `"STS-DB32-2"`；比對時不分大小寫。
+
 ```text
-            ┌──────────── WAL streaming（slot: pgs2）──────────► pgs2
-  pgs1 ─────┤
- （主庫）     └──────────── WAL streaming（slot: pgs3）──────────► pgs3
-  synchronous_standby_names = 'ANY 1 (pgs1, pgs2, pgs3)'
+                  ┌──────── WAL streaming（slot: sts_db32_2）────────► STS-DB32-2
+  STS-DB32-1 ─────┤
+ （主庫）           └──────── WAL streaming（slot: sts_db32_3）────────► STS-DB32-3
+  synchronous_standby_names = 'ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")'
   → 任一台從庫把 WAL fsync 到磁碟，主庫才回應 COMMIT
 ```
 
@@ -80,7 +85,7 @@ sudo chmod 600 /var/lib/pgsql/.pgpass
 
 防火牆（**未實測**）：三台之間都要開 5432（從庫連主庫、切換後角色互換）。
 
-## 步驟 1：主庫 pgs1
+## 步驟 1：主庫 STS-DB32-1
 
 ```bash
 sudo PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" \
@@ -101,7 +106,7 @@ sudo PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 -
 ```bash
 sudo -u postgres tee /var/lib/pgsql/17/data/postgresql.conf >/dev/null <<'CONF'
 # /var/lib/pgsql/17/data/postgresql.conf
-# PostgreSQL 17 Streaming Replication（pgs1~pgs3 共用，主庫與從庫同一份）：效能與運維設定
+# PostgreSQL 17 Streaming Replication（STS-DB32-1~STS-DB32-3 共用，主庫與從庫同一份）：效能與運維設定
 # 和 Standalone 篇相同的參數不再改動，差異在「連線」的 listen_addresses 與「複製」兩段。
 # 以「16 GB RAM、8 vCPU、SSD、專用 PostgreSQL 主機、OLTP 為主」為基準。
 # 每個參數上一行的註解：標「建議」的是調整過的值（括號內是預設值）；
@@ -307,7 +312,7 @@ wal_sender_timeout = 60s
 track_commit_timestamp = off
 # 建議（預設空 = 全部非同步）。任一台從庫確認收到 WAL 才回應 COMMIT（quorum commit），
 # 三台都列出來，任何一台當主庫時設定都一樣；從庫全部掛掉時寫入會卡住，見文章說明
-synchronous_standby_names = 'ANY 1 (pgs1, pgs2, pgs3)'
+synchronous_standby_names = 'ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")'
 # 預設（17+）。邏輯複製 failover slot 用：列出的實體 slot 確認後，邏輯解碼才送出變更
 synchronized_standby_slots = ''
 
@@ -507,7 +512,7 @@ CONF
 | `wal_level` | `replica`（預設） | 串流複製的最低要求；邏輯複製要 `logical` |
 | `max_wal_senders` / `max_replication_slots` | 10（預設） | 每台從庫、每次 `pg_basebackup`、`pg_rewind` 各占一個 sender，預留足夠 |
 | `max_slot_wal_keep_size` | 50GB（建議） | 從庫掛掉時 slot 會讓主庫一直保留 WAL，設上限避免主庫磁碟滿 |
-| `synchronous_standby_names` | `ANY 1 (pgs1, pgs2, pgs3)`（建議） | quorum commit：任一台從庫確認即可 |
+| `synchronous_standby_names` | `ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")`（建議） | quorum commit：任一台從庫確認即可 |
 | `hot_standby_feedback` | `on`（建議） | 減少從庫查詢被取消，代價是從庫長查詢會延後主庫的 vacuum |
 | `recovery_target_timeline` | `latest`（預設） | 主庫切換後從庫自動跟上新 timeline |
 | `wal_log_hints` | `off`（預設） | initdb 已開 data checksums，`pg_rewind` 不需要它 |
@@ -519,7 +524,7 @@ CONF
 
 ```bash
 sudo -u postgres tee /var/lib/pgsql/17/data/pg_hba.conf >/dev/null <<'HBA'
-# /var/lib/pgsql/17/data/pg_hba.conf（Streaming Replication，pgs1~pgs3 共用）
+# /var/lib/pgsql/17/data/pg_hba.conf（Streaming Replication，STS-DB32-1~STS-DB32-3 共用）
 # 由上往下比對，第一筆符合的就用；改完 systemctl reload postgresql-17 即可生效
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
 
@@ -561,11 +566,11 @@ sudo systemctl enable --now postgresql-17
 實測的啟動結果：
 
 ```console
-[pgs1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb
+[STS-DB32-1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb
 Initializing database ... OK
 
 
-[pgs1]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+[STS-DB32-1]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
 Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
 active
 ```
@@ -600,50 +605,50 @@ GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, b
 {: .prompt-danger }
 
 ```console
-[pgs1] postgres=# SET synchronous_commit = local; CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'ChangeMe_Repl_2026';
+[STS-DB32-1] postgres=# SET synchronous_commit = local; CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'ChangeMe_Repl_2026';
 SET
 CREATE ROLE
 
-[pgs1] postgres=# SET synchronous_commit = local; CREATE ROLE rewind_user LOGIN PASSWORD 'ChangeMe_Rewind_2026';
+[STS-DB32-1] postgres=# SET synchronous_commit = local; CREATE ROLE rewind_user LOGIN PASSWORD 'ChangeMe_Rewind_2026';
 SET
 CREATE ROLE
 
-[pgs1] postgres=# SET synchronous_commit = local; GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO rewind_user;
+[STS-DB32-1] postgres=# SET synchronous_commit = local; GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO rewind_user; GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO rewind_user;
 SET
 GRANT
 GRANT
 GRANT
 GRANT
 
-[pgs1] postgres=# SET synchronous_commit = local; CREATE TABLE t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now()); INSERT INTO t_repl(note) VALUES ('before-standby');
+[STS-DB32-1] postgres=# SET synchronous_commit = local; CREATE TABLE t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now()); INSERT INTO t_repl(note) VALUES ('before-standby');
 SET
 CREATE TABLE
 INSERT 0 1
 ```
 
-## 步驟 3：從庫 pg_basebackup（pgs2、pgs3）
+## 步驟 3：從庫 pg_basebackup（STS-DB32-2、STS-DB32-3）
 
 ```bash
-# 在 pgs2 上以 postgres 執行（pgs3 把 pgs2 換成 pgs3）
+# 在 STS-DB32-2 上以 postgres 執行（STS-DB32-3 把 STS-DB32-2 換成 STS-DB32-3）
 sudo -iu postgres /usr/pgsql-17/bin/pg_basebackup \
-  -d 'host=pgs1 user=replicator application_name=pgs2' \
-  -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs2 -P
+  -d 'host=STS-DB32-1 user=replicator application_name=STS-DB32-2' \
+  -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S sts_db32_2 -P
 sudo systemctl enable --now postgresql-17
 ```
 
 | 選項 | 說明 |
 | :--- | :--- |
-| `-d '... application_name=pgs2'` | 連線字串裡的 `application_name` 會寫進 `primary_conninfo`，要和 `synchronous_standby_names` 的名稱對應 |
+| `-d '... application_name=STS-DB32-2'` | 連線字串裡的 `application_name` 會寫進 `primary_conninfo`，要和 `synchronous_standby_names` 的名稱對應 |
 | `-X stream` | 備份期間的 WAL 同時串流過來，備份本身就是一致的 |
 | `-c fast` | 立刻觸發 checkpoint，不等排程 |
 | `-R` | 產生 `standby.signal`，並把 `primary_conninfo` 寫進 `postgresql.auto.conf` |
-| `-C -S pgs2` | 在主庫建立名為 `pgs2` 的 replication slot，並寫入 `primary_slot_name` |
+| `-C -S sts_db32_2` | 在主庫建立名為 `sts_db32_2` 的 replication slot，並寫入 `primary_slot_name` |
 
 ```console
-[pgs2]# ls -A /var/lib/pgsql/17/data | wc -l
+[STS-DB32-2]# ls -A /var/lib/pgsql/17/data | wc -l
 0
 
-[pgs2]$ time /usr/pgsql-17/bin/pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs2' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs2 -P 2>&1 | tail -2
+[STS-DB32-2]$ time /usr/pgsql-17/bin/pg_basebackup -d 'host=STS-DB32-1 user=replicator application_name=STS-DB32-2' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S sts_db32_2 -P 2>&1 | tail -2
 23165/23165 kB (100%), 0/1 tablespace
 23165/23165 kB (100%), 1/1 tablespace
 
@@ -651,21 +656,21 @@ real	0m0.146s
 user	0m0.008s
 sys	0m0.042s
 
-[pgs2]# cat /var/lib/pgsql/17/data/postgresql.auto.conf; ls /var/lib/pgsql/17/data/standby.signal
+[STS-DB32-2]# cat /var/lib/pgsql/17/data/postgresql.auto.conf; ls /var/lib/pgsql/17/data/standby.signal
 # Do not edit this file manually!
 # It will be overwritten by the ALTER SYSTEM command.
-primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=pgs1 port=5432 application_name=pgs2 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
-primary_slot_name = 'pgs2'
+primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=STS-DB32-1 port=5432 application_name=STS-DB32-2 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+primary_slot_name = 'sts_db32_2'
 /var/lib/pgsql/17/data/standby.signal
 
-[pgs2]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+[STS-DB32-2]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
 Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
 active
 
-[pgs3]# ls -A /var/lib/pgsql/17/data | wc -l
+[STS-DB32-3]# ls -A /var/lib/pgsql/17/data | wc -l
 0
 
-[pgs3]$ time /usr/pgsql-17/bin/pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs3' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs3 -P 2>&1 | tail -2
+[STS-DB32-3]$ time /usr/pgsql-17/bin/pg_basebackup -d 'host=STS-DB32-1 user=replicator application_name=STS-DB32-3' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S sts_db32_3 -P 2>&1 | tail -2
 23167/23167 kB (100%), 0/1 tablespace
 23167/23167 kB (100%), 1/1 tablespace
 
@@ -673,20 +678,20 @@ real	0m0.392s
 user	0m0.014s
 sys	0m0.049s
 
-[pgs3]# cat /var/lib/pgsql/17/data/postgresql.auto.conf; ls /var/lib/pgsql/17/data/standby.signal
+[STS-DB32-3]# cat /var/lib/pgsql/17/data/postgresql.auto.conf; ls /var/lib/pgsql/17/data/standby.signal
 # Do not edit this file manually!
 # It will be overwritten by the ALTER SYSTEM command.
-primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=pgs1 port=5432 application_name=pgs3 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
-primary_slot_name = 'pgs3'
+primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=STS-DB32-1 port=5432 application_name=STS-DB32-3 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+primary_slot_name = 'sts_db32_3'
 /var/lib/pgsql/17/data/standby.signal
 
-[pgs3]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
+[STS-DB32-3]# systemctl enable --now postgresql-17 && systemctl is-active postgresql-17
 Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.service → /usr/lib/systemd/system/postgresql-17.service.
 active
 
-[pgs2]# sleep 2; grep -hE "standby|streaming|consistent|redo" /var/lib/pgsql/17/data/log/postgresql-*.log
+[STS-DB32-2]# sleep 2; grep -hE "standby|streaming|consistent|redo" /var/lib/pgsql/17/data/log/postgresql-*.log
 2026-10-24 15:33:39.185 CST [158] LOG:  checkpoint complete: wrote 71 buffers (0.0%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.004 s, sync=0.010 s, total=0.025 s; sync files=54, longest=0.001 s, average=0.001 s; distance=9042 kB, estimate=9042 kB; lsn=0/2000080, redo lsn=0/2000028
-2026-10-24 15:33:39.195 CST [206] replicator@[unknown]/pgs2 192.168.0.2 LOG:  standby "pgs2" is now a candidate for quorum synchronous standby
+2026-10-24 15:33:39.195 CST [206] replicator@[unknown]/STS-DB32-2 192.168.0.2 LOG:  standby "STS-DB32-2" is now a candidate for quorum synchronous standby
 2026-10-24 15:33:39.528 CST [101] LOG:  starting backup recovery with redo LSN 0/2000028, checkpoint LSN 0/2000080, on timeline ID 1
 2026-10-24 15:33:39.528 CST [101] LOG:  entering standby mode
 2026-10-24 15:33:39.529 CST [101] LOG:  redo starts at 0/2000028
@@ -697,38 +702,38 @@ active
 
 - `pg_basebackup` 也會把主庫的 postgresql.conf 與 pg_hba.conf 一起複製過來，三台的設定檔自然一致。
 - `primary_conninfo` 裡的 `passfile` 指向 `.pgpass`，沒有明文密碼。
-- 主庫的日誌（上面混在一起的那幾行是 pgs1 透過 basebackup 複製過來的日誌）出現 `standby "pgs2" is now a candidate for quorum synchronous standby`。
+- 主庫的日誌（上面混在一起的那幾行是 STS-DB32-1 透過 basebackup 複製過來的日誌）出現 `standby "STS-DB32-2" is now a candidate for quorum synchronous standby`。
 
 ## 步驟 4：驗證複製狀態
 
 ```console
-[pgs1] postgres=# SELECT application_name, client_addr, state, sync_state, sync_priority, sent_lsn, replay_lsn, write_lag, flush_lag, replay_lag FROM pg_stat_replication ORDER BY application_name;
+[STS-DB32-1] postgres=# SELECT application_name, client_addr, state, sync_state, sync_priority, sent_lsn, replay_lsn, write_lag, flush_lag, replay_lag FROM pg_stat_replication ORDER BY application_name;
  application_name | client_addr |   state   | sync_state | sync_priority | sent_lsn  | replay_lsn |    write_lag    |    flush_lag    |   replay_lag    
 ------------------+-------------+-----------+------------+---------------+-----------+------------+-----------------+-----------------+-----------------
- pgs2             | 192.168.0.2 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.007641 | 00:00:00.007641 | 00:00:00.000833
- pgs3             | 192.168.0.3 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.000123 | 00:00:00.000123 | 00:00:00.000123
+ STS-DB32-2       | 192.168.0.2 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.007641 | 00:00:00.007641 | 00:00:00.000833
+ STS-DB32-3       | 192.168.0.3 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.000123 | 00:00:00.000123 | 00:00:00.000123
 (2 rows)
 
 
-[pgs1] postgres=# SELECT slot_name, slot_type, active, restart_lsn, wal_status, safe_wal_size FROM pg_replication_slots ORDER BY slot_name;
- slot_name | slot_type | active | restart_lsn | wal_status | safe_wal_size 
------------+-----------+--------+-------------+------------+---------------
- pgs2      | physical  | t      | 0/4000000   | reserved   |   53703868416
- pgs3      | physical  | t      | 0/4000000   | reserved   |   53703868416
+[STS-DB32-1] postgres=# SELECT slot_name, slot_type, active, restart_lsn, wal_status, safe_wal_size FROM pg_replication_slots ORDER BY slot_name;
+ slot_name  | slot_type | active | restart_lsn | wal_status | safe_wal_size 
+------------+-----------+--------+-------------+------------+---------------
+ sts_db32_2 | physical  | t      | 0/4000000   | reserved   |   53703868416
+ sts_db32_3 | physical  | t      | 0/4000000   | reserved   |   53703868416
 (2 rows)
 
 
-[pgs2] postgres=# SELECT pg_is_in_recovery(), status, sender_host, slot_name, received_tli, flushed_lsn FROM pg_stat_wal_receiver;
- pg_is_in_recovery |  status   | sender_host | slot_name | received_tli | flushed_lsn 
--------------------+-----------+-------------+-----------+--------------+-------------
- t                 | streaming | pgs1        | pgs2      |            1 | 0/4000000
+[STS-DB32-2] postgres=# SELECT pg_is_in_recovery(), status, sender_host, slot_name, received_tli, flushed_lsn FROM pg_stat_wal_receiver;
+ pg_is_in_recovery |  status   | sender_host | slot_name  | received_tli | flushed_lsn 
+-------------------+-----------+-------------+------------+--------------+-------------
+ t                 | streaming | STS-DB32-1  | sts_db32_2 |            1 | 0/4000000
 (1 row)
 
 
-[pgs2] postgres=# SHOW synchronous_standby_names;
- synchronous_standby_names 
----------------------------
- ANY 1 (pgs1, pgs2, pgs3)
+[STS-DB32-2] postgres=# SHOW synchronous_standby_names;
+            synchronous_standby_names             
+--------------------------------------------------
+ ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")
 (1 row)
 ```
 
@@ -740,7 +745,7 @@ active
 ## 測試 1、2：主庫寫入、從庫唯讀
 
 ```console
-[pgs1] postgres=# INSERT INTO t_repl(note) SELECT 'row-' || g FROM generate_series(1, 1000) g; SELECT count(*) FROM t_repl;
+[STS-DB32-1] postgres=# INSERT INTO t_repl(note) SELECT 'row-' || g FROM generate_series(1, 1000) g; SELECT count(*) FROM t_repl;
 INSERT 0 1000
  count 
 -------
@@ -748,14 +753,14 @@ INSERT 0 1000
 (1 row)
 
 
-[pgs2] postgres=# SELECT count(*) FROM t_repl;
+[STS-DB32-2] postgres=# SELECT count(*) FROM t_repl;
  count 
 -------
   1001
 (1 row)
 
 
-[pgs3] postgres=# SELECT count(*) FROM t_repl;
+[STS-DB32-3] postgres=# SELECT count(*) FROM t_repl;
  count 
 -------
   1001
@@ -764,7 +769,7 @@ INSERT 0 1000
 
 
 ======== 測試 2：從庫是唯讀 ========  (2026-10-24 15:33:43)
-[pgs2] postgres=# INSERT INTO t_repl(note) VALUES ('write-on-standby');
+[STS-DB32-2] postgres=# INSERT INTO t_repl(note) VALUES ('write-on-standby');
 ERROR:  cannot execute INSERT in a read-only transaction
 ```
 
@@ -773,60 +778,60 @@ ERROR:  cannot execute INSERT in a read-only transaction
 先停一台從庫，寫入照常；兩台都停，COMMIT 就會卡在 `SyncRep`，直到有一台回來：
 
 ```console
-[pgs2]# systemctl stop postgresql-17
+[STS-DB32-2]# systemctl stop postgresql-17
 
-[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('pgs2-down');
+[STS-DB32-1] postgres=# INSERT INTO t_repl(note) VALUES ('STS-DB32-2-down');
 INSERT 0 1
 
-[pgs1] postgres=# SELECT application_name, state, sync_state FROM pg_stat_replication;
+[STS-DB32-1] postgres=# SELECT application_name, state, sync_state FROM pg_stat_replication;
  application_name |   state   | sync_state 
 ------------------+-----------+------------
- pgs3             | streaming | quorum
+ STS-DB32-3       | streaming | quorum
 (1 row)
 
 
-[pgs3]# systemctl stop postgresql-17
+[STS-DB32-3]# systemctl stop postgresql-17
 
-[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('both-down')    （背景執行）
+[STS-DB32-1] postgres=# INSERT INTO t_repl(note) VALUES ('both-down')    （背景執行）
 
-[pgs1]# sleep 3; cat /tmp/bg.out; echo "(還沒有輸出 = COMMIT 卡住)"
+[STS-DB32-1]# sleep 3; cat /tmp/bg.out; echo "(還沒有輸出 = COMMIT 卡住)"
 (還沒有輸出 = COMMIT 卡住)
 
-[pgs1] postgres=# SELECT pid, state, wait_event_type, wait_event, now() - query_start AS waiting, left(query, 50) AS query FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+[STS-DB32-1] postgres=# SELECT pid, state, wait_event_type, wait_event, now() - query_start AS waiting, left(query, 50) AS query FROM pg_stat_activity WHERE wait_event = 'SyncRep';
  pid | state  | wait_event_type | wait_event |     waiting     |                     query                     
 -----+--------+-----------------+------------+-----------------+-----------------------------------------------
  257 | active | IPC             | SyncRep    | 00:00:03.209372 | INSERT INTO t_repl(note) VALUES ('both-down')
 (1 row)
 
 
-[pgs3]# systemctl start postgresql-17; sleep 2
+[STS-DB32-3]# systemctl start postgresql-17; sleep 2
 
-[pgs1]# sleep 1; cat /tmp/bg.out
+[STS-DB32-1]# sleep 1; cat /tmp/bg.out
 INSERT 0 1
 ```
 
 卡住的 COMMIT 如果被取消（`pg_cancel_backend`、應用程式逾時），會收到 WARNING，但**交易其實已經在主庫提交**：
 
 ```console
-[pgs3]# systemctl stop postgresql-17
+[STS-DB32-3]# systemctl stop postgresql-17
 
-[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('cancelled-wait')    （背景執行）
+[STS-DB32-1] postgres=# INSERT INTO t_repl(note) VALUES ('cancelled-wait')    （背景執行）
 
-[pgs1]# sleep 2
+[STS-DB32-1]# sleep 2
 
-[pgs1] postgres=# SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+[STS-DB32-1] postgres=# SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep';
  pg_cancel_backend 
 -------------------
  t
 (1 row)
 
 
-[pgs1]# sleep 1; cat /tmp/bg.out
+[STS-DB32-1]# sleep 1; cat /tmp/bg.out
 WARNING:  canceling wait for synchronous replication due to user request
 DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
 INSERT 0 1
 
-[pgs1] postgres=# SELECT id, note FROM t_repl WHERE note IN ('both-down', 'cancelled-wait');
+[STS-DB32-1] postgres=# SELECT id, note FROM t_repl WHERE note IN ('both-down', 'cancelled-wait');
   id  |      note      
 ------+----------------
  1003 | both-down
@@ -834,15 +839,15 @@ INSERT 0 1
 (2 rows)
 
 
-[pgs2]# systemctl start postgresql-17
+[STS-DB32-2]# systemctl start postgresql-17
 
-[pgs3]# systemctl start postgresql-17; sleep 3
+[STS-DB32-3]# systemctl start postgresql-17; sleep 3
 
-[pgs1] postgres=# SELECT application_name, state, sync_state FROM pg_stat_replication ORDER BY 1;
+[STS-DB32-1] postgres=# SELECT application_name, state, sync_state FROM pg_stat_replication ORDER BY 1;
  application_name |   state   | sync_state 
 ------------------+-----------+------------
- pgs2             | streaming | quorum
- pgs3             | streaming | quorum
+ STS-DB32-2       | streaming | quorum
+ STS-DB32-3       | streaming | quorum
 (2 rows)
 ```
 
@@ -852,40 +857,40 @@ INSERT 0 1
 ## 測試 4：寫入壓力下的複製延遲
 
 ```console
-[pgs1]$ /usr/pgsql-17/bin/pgbench -i -s 10 -q postgres 2>&1 | tail -1
+[STS-DB32-1]$ /usr/pgsql-17/bin/pgbench -i -s 10 -q postgres 2>&1 | tail -1
 done in 0.86 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 0.65 s, vacuum 0.04 s, primary keys 0.16 s).
 
-[pgs1]$ (/usr/pgsql-17/bin/pgbench -c 8 -j 4 -T 20 postgres > /tmp/pgbench.out 2>&1 &); for i in 1 2 3 4; do sleep 4; psql -X -Atc "SELECT now()::time(0), application_name, sync_state, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_bytes, replay_lag FROM pg_stat_replication ORDER BY 2"; done; sleep 6; grep -E "^(tps|latency average|number of transactions actually)" /tmp/pgbench.out
-15:34:02|pgs2|quorum|3752|00:00:00.00054
-15:34:02|pgs3|quorum|6024|00:00:00.000797
-15:34:06|pgs2|quorum|1608|00:00:00.000811
-15:34:06|pgs3|quorum|1264|00:00:00.000517
-15:34:10|pgs2|quorum|1704|00:00:00.000345
-15:34:10|pgs3|quorum|1704|00:00:00.000457
-15:34:14|pgs2|quorum|1176|00:00:00.000691
-15:34:14|pgs3|quorum|1000|00:00:00.000879
+[STS-DB32-1]$ (/usr/pgsql-17/bin/pgbench -c 8 -j 4 -T 20 postgres > /tmp/pgbench.out 2>&1 &); for i in 1 2 3 4; do sleep 4; psql -X -Atc "SELECT now()::time(0), application_name, sync_state, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_bytes, replay_lag FROM pg_stat_replication ORDER BY 2"; done; sleep 6; grep -E "^(tps|latency average|number of transactions actually)" /tmp/pgbench.out
+15:34:02|STS-DB32-2|quorum|3752|00:00:00.00054
+15:34:02|STS-DB32-3|quorum|6024|00:00:00.000797
+15:34:06|STS-DB32-2|quorum|1608|00:00:00.000811
+15:34:06|STS-DB32-3|quorum|1264|00:00:00.000517
+15:34:10|STS-DB32-2|quorum|1704|00:00:00.000345
+15:34:10|STS-DB32-3|quorum|1704|00:00:00.000457
+15:34:14|STS-DB32-2|quorum|1176|00:00:00.000691
+15:34:14|STS-DB32-3|quorum|1000|00:00:00.000879
 number of transactions actually processed: 107745
 latency average = 1.485 ms
 tps = 5387.207172 (without initial connection time)
 
-[pgs1] postgres=# SELECT 'pgs1' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
- node | sum_abalance | history 
-------+--------------+---------
- pgs1 |        85837 |  107745
+[STS-DB32-1] postgres=# SELECT 'STS-DB32-1' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
+ node       | sum_abalance | history 
+------------+--------------+---------
+ STS-DB32-1 |        85837 |  107745
 (1 row)
 
 
-[pgs2] postgres=# SELECT 'pgs2' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
- node | sum_abalance | history 
-------+--------------+---------
- pgs2 |        85837 |  107745
+[STS-DB32-2] postgres=# SELECT 'STS-DB32-2' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
+ node       | sum_abalance | history 
+------------+--------------+---------
+ STS-DB32-2 |        85837 |  107745
 (1 row)
 
 
-[pgs3] postgres=# SELECT 'pgs3' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
- node | sum_abalance | history 
-------+--------------+---------
- pgs3 |        85837 |  107745
+[STS-DB32-3] postgres=# SELECT 'STS-DB32-3' AS node, sum(abalance) AS sum_abalance, (SELECT count(*) FROM pgbench_history) AS history FROM pgbench_accounts;
+ node       | sum_abalance | history 
+------------+--------------+---------
+ STS-DB32-3 |        85837 |  107745
 (1 row)
 ```
 
@@ -895,10 +900,10 @@ tps = 5387.207172 (without initial connection time)
 
 ## 測試 5：故障切換
 
-模擬主庫當機（`docker compose kill` 等於直接斷電），手動提升 pgs2：
+模擬主庫當機（實測環境用 `docker compose kill` 停掉 STS-DB32-1 的容器 `pgs1`，等於直接斷電），手動提升 STS-DB32-2：
 
 ```console
-[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('last-before-crash'); SELECT count(*), pg_current_wal_lsn() FROM t_repl;
+[STS-DB32-1] postgres=# INSERT INTO t_repl(note) VALUES ('last-before-crash'); SELECT count(*), pg_current_wal_lsn() FROM t_repl;
 INSERT 0 1
  count | pg_current_wal_lsn 
 -------+--------------------
@@ -911,9 +916,9 @@ INSERT 0 1
  Container postgresql-lab-pgs1-1 Killing 
  Container postgresql-lab-pgs1-1 Killed 
 
-[pgs2]# sleep 3; grep -hE "terminat|could not|FATAL" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -3
+[STS-DB32-2]# sleep 3; grep -hE "terminat|could not|FATAL" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -3
 		This probably means the server terminated abnormally
-2026-10-24 15:34:20.583 CST [173] FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
+2026-10-24 15:34:20.583 CST [173] FATAL:  could not connect to the primary server: connection to server at "STS-DB32-1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 		This probably means the server terminated abnormally
 ```
 
@@ -922,27 +927,27 @@ INSERT 0 1
 quorum commit 只保證「至少一台」收到，提升前要比較所有從庫收到的位置，提升最新的那台：
 
 ```console
-[pgs2] postgres=# SELECT 'pgs2' AS node, pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), pg_last_xact_replay_timestamp();
- node | pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_last_xact_replay_timestamp 
-------+-------------------------+------------------------+-------------------------------
- pgs2 | 0/E9A63D8               | 0/E9A63D8              | 2026-10-24 15:34:20.508913+08
+[STS-DB32-2] postgres=# SELECT 'STS-DB32-2' AS node, pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), pg_last_xact_replay_timestamp();
+ node       | pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_last_xact_replay_timestamp 
+------------+-------------------------+------------------------+-------------------------------
+ STS-DB32-2 | 0/E9A63D8               | 0/E9A63D8              | 2026-10-24 15:34:20.508913+08
 (1 row)
 
 
-[pgs3] postgres=# SELECT 'pgs3' AS node, pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), pg_last_xact_replay_timestamp();
- node | pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_last_xact_replay_timestamp 
-------+-------------------------+------------------------+-------------------------------
- pgs3 | 0/E9A63D8               | 0/E9A63D8              | 2026-10-24 15:34:20.508913+08
+[STS-DB32-3] postgres=# SELECT 'STS-DB32-3' AS node, pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), pg_last_xact_replay_timestamp();
+ node       | pg_last_wal_receive_lsn | pg_last_wal_replay_lsn | pg_last_xact_replay_timestamp 
+------------+-------------------------+------------------------+-------------------------------
+ STS-DB32-3 | 0/E9A63D8               | 0/E9A63D8              | 2026-10-24 15:34:20.508913+08
 (1 row)
 ```
 
-兩台都是 `0/E9A63D8`，提升 pgs2：
+兩台都是 `0/E9A63D8`，提升 STS-DB32-2：
 
 ```console
 # 主機端：date '+%F %T.%N' | cut -c1-23
 2026-10-24 15:34:24.010
 
-[pgs2] postgres=# SELECT pg_promote(wait => true, wait_seconds => 60);
+[STS-DB32-2] postgres=# SELECT pg_promote(wait => true, wait_seconds => 60);
  pg_promote 
 ------------
  t
@@ -952,14 +957,14 @@ quorum commit 只保證「至少一台」收到，提升前要比較所有從庫
 # 主機端：date '+%F %T.%N' | cut -c1-23
 2026-10-24 15:34:24.189
 
-[pgs2] postgres=# SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS walfile, count(*) FROM t_repl;
+[STS-DB32-2] postgres=# SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS walfile, count(*) FROM t_repl;
  pg_is_in_recovery |         walfile          | count 
 -------------------+--------------------------+-------
  f                 | 00000002000000000000000E |  1005
 (1 row)
 
 
-[pgs2]# grep -hE "promote|selected new timeline|archive recovery complete|ready to accept" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4; ls /var/lib/pgsql/17/data/pg_wal/*.history
+[STS-DB32-2]# grep -hE "promote|selected new timeline|archive recovery complete|ready to accept" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4; ls /var/lib/pgsql/17/data/pg_wal/*.history
 2026-10-24 15:34:24.074 CST [161] LOG:  received promote request
 2026-10-24 15:34:24.077 CST [161] LOG:  selected new timeline ID: 2
 2026-10-24 15:34:24.092 CST [161] LOG:  archive recovery complete
@@ -973,78 +978,78 @@ quorum commit 只保證「至少一台」收到，提升前要比較所有從庫
 
 ### 其他從庫改接新主庫
 
-新主庫沒有舊主庫的 replication slot（實體 slot 不會複製到從庫），要先建立，再把 pgs3 的 `primary_conninfo` 改指向 pgs2：
+新主庫沒有舊主庫的 replication slot（實體 slot 不會複製到從庫），要先建立，再把 STS-DB32-3 的 `primary_conninfo` 改指向 STS-DB32-2：
 
 ```sql
--- pgs2（新主庫）
-SELECT pg_create_physical_replication_slot('pgs3');
-SELECT pg_create_physical_replication_slot('pgs1');   -- 給之後回歸的舊主庫
+-- STS-DB32-2（新主庫）
+SELECT pg_create_physical_replication_slot('sts_db32_3');
+SELECT pg_create_physical_replication_slot('sts_db32_1');   -- 給之後回歸的舊主庫
 
--- pgs3：primary_conninfo 可以 reload 生效（13+），不用重啟
-ALTER SYSTEM SET primary_conninfo = 'host=pgs2 user=replicator application_name=pgs3';
+-- STS-DB32-3：primary_conninfo 可以 reload 生效（13+），不用重啟
+ALTER SYSTEM SET primary_conninfo = 'host=STS-DB32-2 user=replicator application_name=STS-DB32-3';
 SELECT pg_reload_conf();
 ```
 
 ```console
-[pgs2] postgres=# SELECT pg_create_physical_replication_slot('pgs3'); SELECT pg_create_physical_replication_slot('pgs1');
+[STS-DB32-2] postgres=# SELECT pg_create_physical_replication_slot('sts_db32_3'); SELECT pg_create_physical_replication_slot('sts_db32_1');
  pg_create_physical_replication_slot 
 -------------------------------------
- (pgs3,)
+ (sts_db32_3,)
 (1 row)
 
  pg_create_physical_replication_slot 
 -------------------------------------
- (pgs1,)
+ (sts_db32_1,)
 (1 row)
 
 
-[pgs3] postgres=# ALTER SYSTEM SET primary_conninfo = 'host=pgs2 user=replicator application_name=pgs3';
+[STS-DB32-3] postgres=# ALTER SYSTEM SET primary_conninfo = 'host=STS-DB32-2 user=replicator application_name=STS-DB32-3';
 ALTER SYSTEM
 
-[pgs3] postgres=# SELECT pg_reload_conf();
+[STS-DB32-3] postgres=# SELECT pg_reload_conf();
  pg_reload_conf 
 ----------------
  t
 (1 row)
 
 
-[pgs3]# sleep 4; grep -hE "timeline|streaming|primary_conninfo" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4
+[STS-DB32-3]# sleep 4; grep -hE "timeline|streaming|primary_conninfo" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4
 2026-10-24 15:34:24.565 CST [190] LOG:  started streaming WAL from primary at 0/E000000 on timeline 1
 2026-10-24 15:34:24.568 CST [190] DETAIL:  End of WAL reached on timeline 1 at 0/E9A63D8.
 2026-10-24 15:34:24.568 CST [156] LOG:  new target timeline is 2
 2026-10-24 15:34:24.568 CST [190] LOG:  restarted WAL streaming at 0/E000000 on timeline 2
 
-[pgs3] postgres=# SELECT status, sender_host, received_tli, flushed_lsn FROM pg_stat_wal_receiver;
+[STS-DB32-3] postgres=# SELECT status, sender_host, received_tli, flushed_lsn FROM pg_stat_wal_receiver;
   status   | sender_host | received_tli | flushed_lsn 
 -----------+-------------+--------------+-------------
- streaming | pgs2        |            2 | 0/E9A70B8
+ streaming | STS-DB32-2  |            2 | 0/E9A70B8
 (1 row)
 
 
-[pgs2] postgres=# INSERT INTO t_repl(note) VALUES ('after-failover'); SELECT application_name, state, sync_state FROM pg_stat_replication;
+[STS-DB32-2] postgres=# INSERT INTO t_repl(note) VALUES ('after-failover'); SELECT application_name, state, sync_state FROM pg_stat_replication;
 INSERT 0 1
  application_name |   state   | sync_state 
 ------------------+-----------+------------
- pgs3             | streaming | quorum
+ STS-DB32-3       | streaming | quorum
 (1 row)
 
 
-[pgs3] postgres=# SELECT count(*), max(note) FILTER (WHERE id = (SELECT max(id) FROM t_repl)) AS last_note FROM t_repl;
+[STS-DB32-3] postgres=# SELECT count(*), max(note) FILTER (WHERE id = (SELECT max(id) FROM t_repl)) AS last_note FROM t_repl;
  count |   last_note    
 -------+----------------
   1006 | after-failover
 (1 row)
 ```
 
-`new target timeline is 2`：pgs3 自動跟上新的 timeline（`recovery_target_timeline = 'latest'`）。新主庫的寫入透過 quorum 同步到 pgs3。
+`new target timeline is 2`：STS-DB32-3 自動跟上新的 timeline（`recovery_target_timeline = 'latest'`）。新主庫的寫入透過 quorum 同步到 STS-DB32-3。
 
-> **實測踩到的坑**：第一次把 `ALTER SYSTEM ...; SELECT pg_reload_conf();` 放在同一個 `psql -c` 裡執行，得到 `ERROR: ALTER SYSTEM cannot run inside a transaction block`。`psql -c` 帶多個語句時會包成一個隱含交易，而 `ALTER SYSTEM` 不能在交易裡執行；結果 pgs3 沒有改接，pgs2 上的同步寫入就卡住了。分成兩次執行即可。
+> **實測踩到的坑**：第一次把 `ALTER SYSTEM ...; SELECT pg_reload_conf();` 放在同一個 `psql -c` 裡執行，得到 `ERROR: ALTER SYSTEM cannot run inside a transaction block`。`psql -c` 帶多個語句時會包成一個隱含交易，而 `ALTER SYSTEM` 不能在交易裡執行；結果 STS-DB32-3 沒有改接，STS-DB32-2 上的同步寫入就卡住了。分成兩次執行即可。
 {: .prompt-danger }
 
-新主庫 pgs2 的 `postgresql.auto.conf` 裡還留著當從庫時的 `primary_conninfo`（指向 pgs1）與 `primary_slot_name`。沒有 `standby.signal` 時這兩個參數不會作用，但建議清掉，避免日後誤會：
+新主庫 STS-DB32-2 的 `postgresql.auto.conf` 裡還留著當從庫時的 `primary_conninfo`（指向 STS-DB32-1）與 `primary_slot_name`。沒有 `standby.signal` 時這兩個參數不會作用，但建議清掉，避免日後誤會：
 
 ```sql
--- pgs2
+-- STS-DB32-2
 ALTER SYSTEM RESET primary_conninfo;
 ALTER SYSTEM RESET primary_slot_name;
 SELECT pg_reload_conf();
@@ -1054,40 +1059,40 @@ SELECT pg_reload_conf();
 
 ### 舊主庫自己起來了：腦裂
 
-pgs1 的機器恢復後，systemd 照設定自動啟動 PostgreSQL，而且是以**主庫**身分：
+STS-DB32-1 的機器恢復後，systemd 照設定自動啟動 PostgreSQL，而且是以**主庫**身分：
 
 ```console
 # 主機端：docker compose start pgs1
  Container postgresql-lab-pgs1-1 Starting 
  Container postgresql-lab-pgs1-1 Started 
 
-[pgs1]# sleep 5; systemctl is-active postgresql-17
+[STS-DB32-1]# sleep 5; systemctl is-active postgresql-17
 active
 
-[pgs1] postgres=# SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS walfile;
+[STS-DB32-1] postgres=# SELECT pg_is_in_recovery(), pg_walfile_name(pg_current_wal_lsn()) AS walfile;
  pg_is_in_recovery |         walfile          
 -------------------+--------------------------
  f                 | 00000001000000000000000E
 (1 row)
 
 
-[pgs1] postgres=# INSERT INTO t_repl(note) VALUES ('split-brain')    （背景執行）
+[STS-DB32-1] postgres=# INSERT INTO t_repl(note) VALUES ('split-brain')    （背景執行）
 
-[pgs1]# sleep 2
+[STS-DB32-1]# sleep 2
 
-[pgs1] postgres=# SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+[STS-DB32-1] postgres=# SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE wait_event = 'SyncRep';
  pg_cancel_backend 
 -------------------
  t
 (1 row)
 
 
-[pgs1]# sleep 1; cat /tmp/bg.out
+[STS-DB32-1]# sleep 1; cat /tmp/bg.out
 WARNING:  canceling wait for synchronous replication due to user request
 DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
 INSERT 0 1
 
-[pgs1] postgres=# SELECT id, note FROM t_repl ORDER BY id DESC LIMIT 2;
+[STS-DB32-1] postgres=# SELECT id, note FROM t_repl ORDER BY id DESC LIMIT 2;
   id  |       note        
 ------+-------------------
  1025 | split-brain
@@ -1096,8 +1101,8 @@ INSERT 0 1
 ```
 
 - `pg_is_in_recovery = f`，WAL 還在 timeline 1：現在有兩台主庫。
-- pgs1 自己的 `synchronous_standby_names` 沒有任何從庫連上，寫入卡在 `SyncRep`，看起來好像有保護；但只要取消等待，**這筆 `split-brain` 就已經在 pgs1 上提交了**（id 從 1005 跳到 1025：sequence 會預先把後面 32 個值記進 WAL，當機重啟後從記錄的位置繼續，所以會跳號）。
-- 如果應用程式還連得到 pgs1（DNS、連線池沒更新），就會有資料寫進錯誤的主庫。這就是為什麼切換的第一步是**隔離舊主庫**，也是 Patroni 這類工具存在的理由。
+- STS-DB32-1 自己的 `synchronous_standby_names` 沒有任何從庫連上，寫入卡在 `SyncRep`，看起來好像有保護；但只要取消等待，**這筆 `split-brain` 就已經在 STS-DB32-1 上提交了**（id 從 1005 跳到 1025：sequence 會預先把後面 32 個值記進 WAL，當機重啟後從記錄的位置繼續，所以會跳號）。
+- 如果應用程式還連得到 STS-DB32-1（DNS、連線池沒更新），就會有資料寫進錯誤的主庫。這就是為什麼切換的第一步是**隔離舊主庫**，也是 Patroni 這類工具存在的理由。
 
 > 手動切換的環境，建議在主庫掛掉後先處理開機自動啟動：機器恢復前就 `systemctl disable postgresql-17`（或在網路層隔離），確認要當從庫再啟動。
 {: .prompt-danger }
@@ -1105,41 +1110,41 @@ INSERT 0 1
 ### 直接當從庫啟動：失敗
 
 ```console
-[pgs1]# systemctl stop postgresql-17 && runuser -u postgres -- touch /var/lib/pgsql/17/data/standby.signal && printf "%s\n" "primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'" "primary_slot_name = 'pgs1'" >> /var/lib/pgsql/17/data/postgresql.auto.conf && cat /var/lib/pgsql/17/data/postgresql.auto.conf && systemctl start postgresql-17; sleep 5; systemctl is-active postgresql-17
+[STS-DB32-1]# systemctl stop postgresql-17 && runuser -u postgres -- touch /var/lib/pgsql/17/data/standby.signal && printf "%s\n" "primary_conninfo = 'host=STS-DB32-2 user=replicator application_name=STS-DB32-1'" "primary_slot_name = 'sts_db32_1'" >> /var/lib/pgsql/17/data/postgresql.auto.conf && cat /var/lib/pgsql/17/data/postgresql.auto.conf && systemctl start postgresql-17; sleep 5; systemctl is-active postgresql-17
 # Do not edit this file manually!
 # It will be overwritten by the ALTER SYSTEM command.
-primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'
-primary_slot_name = 'pgs1'
+primary_conninfo = 'host=STS-DB32-2 user=replicator application_name=STS-DB32-1'
+primary_slot_name = 'sts_db32_1'
 active
 
-[pgs1]# grep -hE "FATAL|forked|not a child|timeline" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4
+[STS-DB32-1]# grep -hE "FATAL|forked|not a child|timeline" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -4
 2026-10-24 15:34:37.953 CST [114] LOG:  new timeline 2 forked off current database system timeline 1 before current recovery point 0/F0000A0
 2026-10-24 15:34:42.964 CST [118] FATAL:  could not start WAL streaming: ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
 	DETAIL:  This server's history forked from timeline 1 at 0/E9A63D8.
 2026-10-24 15:34:42.964 CST [114] LOG:  new timeline 2 forked off current database system timeline 1 before current recovery point 0/F0000A0
 ```
 
-pgs1 在 timeline 1 上多寫了東西（WAL 位置 `0/F0000A0`），而 pgs2 是在 `0/E9A63D8` 就分岔到 timeline 2，pgs1 沒辦法接上去：`requested starting point 0/F000000 on timeline 1 is not in this server's history`。
+STS-DB32-1 在 timeline 1 上多寫了東西（WAL 位置 `0/F0000A0`），而 STS-DB32-2 是在 `0/E9A63D8` 就分岔到 timeline 2，STS-DB32-1 沒辦法接上去：`requested starting point 0/F000000 on timeline 1 is not in this server's history`。
 
 ### pg_rewind
 
 ```bash
 sudo systemctl stop postgresql-17
 # -n 先試跑，不會改任何檔案
-sudo -iu postgres /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P
-sudo -iu postgres /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P
+sudo -iu postgres /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=STS-DB32-2 user=rewind_user dbname=postgres' -n -P
+sudo -iu postgres /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=STS-DB32-2 user=rewind_user dbname=postgres' -P
 ```
 
 ```console
-[pgs1]# systemctl stop postgresql-17; systemctl is-active postgresql-17
+[STS-DB32-1]# systemctl stop postgresql-17; systemctl is-active postgresql-17
 inactive
 
-[pgs1]$ /usr/pgsql-17/bin/pg_controldata /var/lib/pgsql/17/data | grep -E 'cluster state|TimeLineID'
+[STS-DB32-1]$ /usr/pgsql-17/bin/pg_controldata /var/lib/pgsql/17/data | grep -E 'cluster state|TimeLineID'
 Database cluster state:               shut down in recovery
 Latest checkpoint's TimeLineID:       1
 Latest checkpoint's PrevTimeLineID:   1
 
-[pgs1]$ /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P 2>&1 | tail -6
+[STS-DB32-1]$ /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=STS-DB32-2 user=rewind_user dbname=postgres' -n -P 2>&1 | tail -6
 pg_rewind: need to copy 383 MB (total source directory size is 402 MB)
      0/392784 kB (0%) copied
 392784/392784 kB (100%) copied
@@ -1147,7 +1152,7 @@ pg_rewind: creating backup label and updating control file
 pg_rewind: syncing target data directory
 pg_rewind: Done!
 
-[pgs1]$ time /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P 2>&1 | tail -6
+[STS-DB32-1]$ time /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=STS-DB32-2 user=rewind_user dbname=postgres' -P 2>&1 | tail -6
      0/392784 kB (0%) copied
 154446/392784 kB (39%) copied
 392784/392784 kB (100%) copied
@@ -1159,26 +1164,26 @@ real	0m0.531s
 user	0m0.131s
 sys	0m0.130s
 
-[pgs1]# ls /var/lib/pgsql/17/data/standby.signal 2>&1; cat /var/lib/pgsql/17/data/postgresql.auto.conf
+[STS-DB32-1]# ls /var/lib/pgsql/17/data/standby.signal 2>&1; cat /var/lib/pgsql/17/data/postgresql.auto.conf
 ls: cannot access '/var/lib/pgsql/17/data/standby.signal': No such file or directory
 # Do not edit this file manually!
 # It will be overwritten by the ALTER SYSTEM command.
-primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=pgs1 port=5432 application_name=pgs2 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
-primary_slot_name = 'pgs2'
+primary_conninfo = 'user=replicator passfile=''/var/lib/pgsql/.pgpass'' channel_binding=prefer host=STS-DB32-1 port=5432 application_name=STS-DB32-2 sslmode=prefer sslnegotiation=postgres sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+primary_slot_name = 'sts_db32_2'
 ```
 
 `pg_rewind` 的前提是目標乾淨關機（`shut down` 或 `shut down in recovery`）且開了 data checksums 或 `wal_log_hints`。這次要複製 383 MB（整個目錄 402 MB），因為 pgbench 的表在分岔後被大量更新過；寫入少的環境複製量會小很多（**沒有另外量測**）。
 
 **pg_rewind 完成後還沒結束**，有兩件事要自己處理：
 
-1. **`postgresql.auto.conf` 被換成新主庫的版本**：上面的輸出可以看到，內容變成 pgs2 當從庫時的 `primary_conninfo`（`host=pgs1 ... application_name=pgs2`）與 `primary_slot_name = 'pgs2'`。如果直接啟動，pgs1 會用錯誤的名稱去連一台不存在的主庫。
+1. **`postgresql.auto.conf` 被換成新主庫的版本**：上面的輸出可以看到，內容變成 STS-DB32-2 當從庫時的 `primary_conninfo`（`host=STS-DB32-1 ... application_name=STS-DB32-2`）與 `primary_slot_name = 'sts_db32_2'`。如果直接啟動，STS-DB32-1 會用錯誤的名稱去連一台不存在的主庫。
 2. **沒有 `standby.signal`**：直接啟動會變成第二台主庫。
 
 ```bash
 sudo -u postgres touch /var/lib/pgsql/17/data/standby.signal
 sudo -u postgres tee /var/lib/pgsql/17/data/postgresql.auto.conf <<'CONF'
-primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'
-primary_slot_name = 'pgs1'
+primary_conninfo = 'host=STS-DB32-2 user=replicator application_name=STS-DB32-1'
+primary_slot_name = 'sts_db32_1'
 CONF
 sudo systemctl start postgresql-17
 ```
@@ -1187,84 +1192,84 @@ sudo systemctl start postgresql-17
 {: .prompt-tip }
 
 ```console
-[pgs1]# runuser -u postgres -- touch /var/lib/pgsql/17/data/standby.signal; printf "%s\n" "primary_conninfo = 'host=pgs2 user=replicator application_name=pgs1'" "primary_slot_name = 'pgs1'" > /var/lib/pgsql/17/data/postgresql.auto.conf; chown postgres: /var/lib/pgsql/17/data/postgresql.auto.conf; systemctl start postgresql-17; sleep 5; systemctl is-active postgresql-17
+[STS-DB32-1]# runuser -u postgres -- touch /var/lib/pgsql/17/data/standby.signal; printf "%s\n" "primary_conninfo = 'host=STS-DB32-2 user=replicator application_name=STS-DB32-1'" "primary_slot_name = 'sts_db32_1'" > /var/lib/pgsql/17/data/postgresql.auto.conf; chown postgres: /var/lib/pgsql/17/data/postgresql.auto.conf; systemctl start postgresql-17; sleep 5; systemctl is-active postgresql-17
 active
 
-[pgs1]# grep -hE "redo|consistent|streaming|timeline" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -5
+[STS-DB32-1]# grep -hE "redo|consistent|streaming|timeline" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -5
 2026-10-24 15:34:44.516 CST [184] LOG:  starting backup recovery with redo LSN 0/3000028, checkpoint LSN 0/3000080, on timeline ID 1
 2026-10-24 15:34:44.517 CST [184] LOG:  redo starts at 0/3000028
 2026-10-24 15:34:44.517 CST [184] LOG:  completed backup recovery with redo LSN 0/3000028 and end LSN 0/3000120
 2026-10-24 15:34:44.837 CST [184] LOG:  consistent recovery state reached at 0/E9AABE8
 2026-10-24 15:34:44.846 CST [185] LOG:  started streaming WAL from primary at 0/E000000 on timeline 2
 
-[pgs1] postgres=# SELECT pg_is_in_recovery(), status, sender_host, received_tli FROM pg_stat_wal_receiver;
+[STS-DB32-1] postgres=# SELECT pg_is_in_recovery(), status, sender_host, received_tli FROM pg_stat_wal_receiver;
  pg_is_in_recovery |  status   | sender_host | received_tli 
 -------------------+-----------+-------------+--------------
- t                 | streaming | pgs2        |            2
+ t                 | streaming | STS-DB32-2  |            2
 (1 row)
 
 
-[pgs2] postgres=# SELECT application_name, state, sync_state, replay_lag FROM pg_stat_replication ORDER BY 1;
+[STS-DB32-2] postgres=# SELECT application_name, state, sync_state, replay_lag FROM pg_stat_replication ORDER BY 1;
  application_name |   state   | sync_state |   replay_lag    
 ------------------+-----------+------------+-----------------
- pgs1             | streaming | quorum     | 00:00:00.0001
- pgs3             | streaming | quorum     | 00:00:00.000318
+ STS-DB32-1       | streaming | quorum     | 00:00:00.0001
+ STS-DB32-3       | streaming | quorum     | 00:00:00.000318
 (2 rows)
 
 
-[pgs1] postgres=# SELECT 'pgs1' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
- node | count | split_brain_rows | max  
-------+-------+------------------+------
- pgs1 |  1006 |                0 | 1025
+[STS-DB32-1] postgres=# SELECT 'STS-DB32-1' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
+ node       | count | split_brain_rows | max  
+------------+-------+------------------+------
+ STS-DB32-1 |  1006 |                0 | 1025
 (1 row)
 
 
-[pgs2] postgres=# SELECT 'pgs2' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
- node | count | split_brain_rows | max  
-------+-------+------------------+------
- pgs2 |  1006 |                0 | 1025
+[STS-DB32-2] postgres=# SELECT 'STS-DB32-2' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
+ node       | count | split_brain_rows | max  
+------------+-------+------------------+------
+ STS-DB32-2 |  1006 |                0 | 1025
 (1 row)
 
 
-[pgs3] postgres=# SELECT 'pgs3' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
- node | count | split_brain_rows | max  
-------+-------+------------------+------
- pgs3 |  1006 |                0 | 1025
+[STS-DB32-3] postgres=# SELECT 'STS-DB32-3' AS node, count(*), count(*) FILTER (WHERE note = 'split-brain') AS split_brain_rows, max(id) FROM t_repl;
+ node       | count | split_brain_rows | max  
+------------+-------+------------------+------
+ STS-DB32-3 |  1006 |                0 | 1025
 (1 row)
 ```
 
-- pgs1 回到叢集，以從庫身分接上 pgs2，timeline 2，`sync_state = quorum`。
-- 三台都是 1006 筆，`split_brain_rows = 0`：**pgs1 在腦裂期間寫入的那筆被 pg_rewind 丟掉了**。真實環境若腦裂期間有業務寫入，要在 rewind 之前先把那些資料匯出比對。
+- STS-DB32-1 回到叢集，以從庫身分接上 STS-DB32-2，timeline 2，`sync_state = quorum`。
+- 三台都是 1006 筆，`split_brain_rows = 0`：**STS-DB32-1 在腦裂期間寫入的那筆被 pg_rewind 丟掉了**。真實環境若腦裂期間有業務寫入，要在 rewind 之前先把那些資料匯出比對。
 
 ### pg_rewind 會覆蓋日誌
 
 最後的錯誤日誌摘要：
 
 ```console
-[pgs1]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
+[STS-DB32-1]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
 7
-      3 replicator@[unknown]/pgs1 192.168.0.1 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+      3 replicator@[unknown]/STS-DB32-1 192.168.0.1 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
       1 postgres@postgres/psql [local] ERROR:  cannot execute INSERT in a read-only transaction
       1 FATAL:  terminating walreceiver process due to administrator command
       1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
-      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "STS-DB32-1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 
-[pgs2]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
+[STS-DB32-2]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
 7
-      3 replicator@[unknown]/pgs1 192.168.0.1 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+      3 replicator@[unknown]/STS-DB32-1 192.168.0.1 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
       1 postgres@postgres/psql [local] ERROR:  cannot execute INSERT in a read-only transaction
       1 FATAL:  terminating walreceiver process due to administrator command
       1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
-      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "STS-DB32-1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 
-[pgs3]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
+[STS-DB32-3]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
 4
       2 FATAL:  terminating walreceiver process due to administrator command
       1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
-      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "STS-DB32-1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 ```
 
-pgs1 和 pgs2 的摘要**一模一樣**，因為 `log_directory = 'log'` 在資料目錄底下，`pg_rewind` 把它也換成了 pgs2 的版本，**pgs1 自己當機前後的日誌不見了**。事故調查需要這些日誌，所以：
+STS-DB32-1 和 STS-DB32-2 的摘要**一模一樣**，因為 `log_directory = 'log'` 在資料目錄底下，`pg_rewind` 把它也換成了 STS-DB32-2 的版本，**STS-DB32-1 自己當機前後的日誌不見了**。事故調查需要這些日誌，所以：
 
 - 執行 `pg_rewind` 前先備份 `$PGDATA/log`，或
 - 把 `log_directory` 設到資料目錄外面（例如 `/var/log/postgresql`，要先建立目錄並給 postgres 權限）。
@@ -1283,7 +1288,7 @@ pgs1 和 pgs2 的摘要**一模一樣**，因為 `log_directory = 'log'` 在資�
 
 ## 驗證方式與結果
 
-驗證環境、建置檔與 compose 檔和 Standalone 篇相同（放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab)），`pgs1`～`pgs3` 使用已安裝 PostgreSQL 17.11（尚未 initdb）的 `pglab-rocky9-pg17` 映像。測試腳本 `tools/postgresql-lab/20-streaming.sh` 整份約 1 分 20 秒跑完，完整輸出在 `results/20-streaming.log`。
+驗證環境、建置檔與 compose 檔和 Standalone 篇相同（放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab)），三台（實測時的容器名稱是 `pgs1`～`pgs3`，文中改寫為 STS-DB32-1～3）使用已安裝 PostgreSQL 17.11（尚未 initdb）的 `pglab-rocky9-pg17` 映像。測試腳本 `tools/postgresql-lab/20-streaming.sh` 整份約 1 分 20 秒跑完，完整輸出在 `results/20-streaming.log`。
 
 | 測試 | 怎麼驗證 | 判定通過的條件 | 結果 |
 | :--- | :--- | :--- | :--- |
@@ -1296,7 +1301,7 @@ pgs1 和 pgs2 的摘要**一模一樣**，因為 `log_directory = 'log'` 在資�
 | 取消同步等待 | `pg_cancel_backend` | WARNING 且交易已提交 | ✅ |
 | 寫入壓力 | pgbench 20 秒 | 三台資料一致、replay_lag < 1 ms | ✅ |
 | 故障切換 | kill 主庫、`pg_promote()` | 新 timeline、資料不遺失 | ✅ 0.18 秒、1005 筆 |
-| 從庫改接 | `ALTER SYSTEM` + reload | pgs3 跟上 timeline 2 | ✅ |
+| 從庫改接 | `ALTER SYSTEM` + reload | STS-DB32-3 跟上 timeline 2 | ✅ |
 | 舊主庫直接當從庫 | standby.signal | 失敗（timeline 分岔） | ✅ 如預期失敗 |
 | pg_rewind | rewind 後啟動 | 接上新主庫、三台一致、腦裂寫入被丟棄 | ✅ 0.53 秒 |
 
