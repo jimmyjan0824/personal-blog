@@ -628,6 +628,35 @@ INSERT 0 1
 
 ## 步驟 3：從庫 pg_basebackup（STS-DB32-2、STS-DB32-3）
 
+`pg_basebackup` 只接受**不存在或空的**資料目錄，否則會出現 `directory "/var/lib/pgsql/17/data" exists but is not empty`。如果這台從庫曾經 initdb 過、啟動過服務，或之前跑過一次失敗的 `pg_basebackup`，要先停掉服務、清空資料目錄：
+
+> **以下清空指令只能在從庫（STS-DB32-2、STS-DB32-3）上執行，絕對不要在主庫 STS-DB32-1 上執行**，會把主庫的資料全部刪掉。執行前先用 `hostname` 確認所在主機。
+{: .prompt-danger }
+
+```bash
+# 只在從庫執行！先確認主機名稱
+hostname
+
+# 停止服務（沒啟動過也沒關係）
+sudo systemctl stop postgresql-17
+
+# 清空資料目錄內的所有檔案（含隱藏檔），保留目錄本身與其擁有者 postgres、權限 700
+sudo -u postgres find /var/lib/pgsql/17/data -mindepth 1 -delete
+
+# 確認已清空：輸出 0 才正確
+sudo ls -A /var/lib/pgsql/17/data | wc -l
+```
+
+如果之前的 `pg_basebackup` 已經在主庫建立了 slot（例如做到一半失敗），再次執行 `-C -S sts_db32_2` 會出現 `replication slot "sts_db32_2" already exists`。先在**主庫**確認並刪除這個沒在使用的 slot：
+
+```bash
+# 在主庫 STS-DB32-1 執行
+sudo -u postgres psql -X -c "SELECT slot_name, active FROM pg_replication_slots;"
+sudo -u postgres psql -X -c "SELECT pg_drop_replication_slot('sts_db32_2');"
+```
+
+資料目錄清空後再執行 `pg_basebackup`：
+
 ```bash
 # 在 STS-DB32-2 上以 postgres 執行（STS-DB32-3 把 STS-DB32-2 換成 STS-DB32-3）
 sudo -iu postgres /usr/pgsql-17/bin/pg_basebackup \
