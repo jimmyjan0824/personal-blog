@@ -51,10 +51,10 @@ pg_restore -d appdb_restore -t orders appdb_2026-10-24.dump
 
 ```bash
 # 以 tar 格式備份整個叢集，WAL 一起串流進來（-X stream），備份本身就能還原
-pg_basebackup -h 127.0.0.1 -U replicator -D /backup/base_$(date +%F) -Ft -z -X stream -c fast -P
+/usr/pgsql-17/bin/pg_basebackup -h 127.0.0.1 -U replicator -D /backup/base_$(date +%F) -Ft -z -X stream -c fast -P
 
 # 驗證備份（13+，依 backup_manifest 檢查每個檔案的 checksum）
-pg_verifybackup /backup/base_2026-10-24     # 17 只支援 plain 格式；tar 格式要先解開
+/usr/pgsql-17/bin/pg_verifybackup /backup/base_2026-10-24     # 17 只支援 plain 格式；tar 格式要先解開
 ```
 
 - `-c fast`：立刻觸發 checkpoint，不用等下一次排程的 checkpoint。
@@ -71,13 +71,13 @@ summarize_wal = on
 
 ```bash
 # 週日全量
-pg_basebackup -D /backup/full -c fast
+/usr/pgsql-17/bin/pg_basebackup -D /backup/full -c fast
 # 週一起增量：指定上一份備份的 backup_manifest
-pg_basebackup -D /backup/incr1 --incremental=/backup/full/backup_manifest -c fast
-pg_basebackup -D /backup/incr2 --incremental=/backup/incr1/backup_manifest -c fast
+/usr/pgsql-17/bin/pg_basebackup -D /backup/incr1 --incremental=/backup/full/backup_manifest -c fast
+/usr/pgsql-17/bin/pg_basebackup -D /backup/incr2 --incremental=/backup/incr1/backup_manifest -c fast
 
 # 還原前用 pg_combinebackup 把全量 + 增量合成一份完整的備份
-pg_combinebackup /backup/full /backup/incr1 /backup/incr2 -o /restore/data
+/usr/pgsql-17/bin/pg_combinebackup /backup/full /backup/incr1 /backup/incr2 -o /restore/data
 ```
 
 適合「資料量大、每天只改一小部分」的資料庫。不過 `pg_combinebackup` 只能處理 plain 格式的備份，也沒有內建的保留與排程管理，**大型正式環境多半還是用 pgBackRest**。

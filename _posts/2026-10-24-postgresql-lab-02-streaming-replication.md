@@ -593,7 +593,7 @@ INSERT 0 1
 
 ```bash
 # 在 pgs2 上以 postgres 執行（pgs3 把 pgs2 換成 pgs3）
-sudo -iu postgres pg_basebackup \
+sudo -iu postgres /usr/pgsql-17/bin/pg_basebackup \
   -d 'host=pgs1 user=replicator application_name=pgs2' \
   -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs2 -P
 sudo systemctl enable --now postgresql-17
@@ -611,7 +611,7 @@ sudo systemctl enable --now postgresql-17
 [pgs2]# ls -A /var/lib/pgsql/17/data | wc -l
 0
 
-[pgs2]$ time pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs2' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs2 -P 2>&1 | tail -2
+[pgs2]$ time /usr/pgsql-17/bin/pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs2' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs2 -P 2>&1 | tail -2
 23165/23165 kB (100%), 0/1 tablespace
 23165/23165 kB (100%), 1/1 tablespace
 
@@ -633,7 +633,7 @@ active
 [pgs3]# ls -A /var/lib/pgsql/17/data | wc -l
 0
 
-[pgs3]$ time pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs3' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs3 -P 2>&1 | tail -2
+[pgs3]$ time /usr/pgsql-17/bin/pg_basebackup -d 'host=pgs1 user=replicator application_name=pgs3' -D /var/lib/pgsql/17/data -X stream -c fast -R -C -S pgs3 -P 2>&1 | tail -2
 23167/23167 kB (100%), 0/1 tablespace
 23167/23167 kB (100%), 1/1 tablespace
 
@@ -820,10 +820,10 @@ INSERT 0 1
 ## 測試 4：寫入壓力下的複製延遲
 
 ```console
-[pgs1]$ pgbench -i -s 10 -q postgres 2>&1 | tail -1
+[pgs1]$ /usr/pgsql-17/bin/pgbench -i -s 10 -q postgres 2>&1 | tail -1
 done in 0.86 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 0.65 s, vacuum 0.04 s, primary keys 0.16 s).
 
-[pgs1]$ (pgbench -c 8 -j 4 -T 20 postgres > /tmp/pgbench.out 2>&1 &); for i in 1 2 3 4; do sleep 4; psql -X -Atc "SELECT now()::time(0), application_name, sync_state, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_bytes, replay_lag FROM pg_stat_replication ORDER BY 2"; done; sleep 6; grep -E "^(tps|latency average|number of transactions actually)" /tmp/pgbench.out
+[pgs1]$ (/usr/pgsql-17/bin/pgbench -c 8 -j 4 -T 20 postgres > /tmp/pgbench.out 2>&1 &); for i in 1 2 3 4; do sleep 4; psql -X -Atc "SELECT now()::time(0), application_name, sync_state, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_bytes, replay_lag FROM pg_stat_replication ORDER BY 2"; done; sleep 6; grep -E "^(tps|latency average|number of transactions actually)" /tmp/pgbench.out
 15:34:02|pgs2|quorum|3752|00:00:00.00054
 15:34:02|pgs3|quorum|6024|00:00:00.000797
 15:34:06|pgs2|quorum|1608|00:00:00.000811
@@ -1094,20 +1094,20 @@ pgs1 在 timeline 1 上多寫了東西（WAL 位置 `0/F0000A0`），而 pgs2 �
 ```bash
 sudo systemctl stop postgresql-17
 # -n 先試跑，不會改任何檔案
-sudo -iu postgres pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P
-sudo -iu postgres pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P
+sudo -iu postgres /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P
+sudo -iu postgres /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P
 ```
 
 ```console
 [pgs1]# systemctl stop postgresql-17; systemctl is-active postgresql-17
 inactive
 
-[pgs1]$ pg_controldata /var/lib/pgsql/17/data | grep -E 'cluster state|TimeLineID'
+[pgs1]$ /usr/pgsql-17/bin/pg_controldata /var/lib/pgsql/17/data | grep -E 'cluster state|TimeLineID'
 Database cluster state:               shut down in recovery
 Latest checkpoint's TimeLineID:       1
 Latest checkpoint's PrevTimeLineID:   1
 
-[pgs1]$ pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P 2>&1 | tail -6
+[pgs1]$ /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -n -P 2>&1 | tail -6
 pg_rewind: need to copy 383 MB (total source directory size is 402 MB)
      0/392784 kB (0%) copied
 392784/392784 kB (100%) copied
@@ -1115,7 +1115,7 @@ pg_rewind: creating backup label and updating control file
 pg_rewind: syncing target data directory
 pg_rewind: Done!
 
-[pgs1]$ time pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P 2>&1 | tail -6
+[pgs1]$ time /usr/pgsql-17/bin/pg_rewind -D /var/lib/pgsql/17/data --source-server='host=pgs2 user=rewind_user dbname=postgres' -P 2>&1 | tail -6
      0/392784 kB (0%) copied
 154446/392784 kB (39%) copied
 392784/392784 kB (100%) copied

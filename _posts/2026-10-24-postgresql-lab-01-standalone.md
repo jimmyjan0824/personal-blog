@@ -157,6 +157,7 @@ postgres (PostgreSQL) 17.11
 psql (PostgreSQL) 17.11
 ```
 
+- PGDG 只把 `psql`、`pg_dump`、`pg_restore` 等用戶端工具透過 alternatives 連到 `/usr/bin`；`pg_controldata`、`pg_ctl`、`pg_rewind`、`pg_basebackup`、`pgbench` 等工具**不在 PATH**，要寫完整路徑 `/usr/pgsql-17/bin/...`，本系列的指令都以完整路徑書寫。上面 `which psql` 顯示 `/usr/pgsql-17/bin/psql`，是因為實測腳本把這個目錄加進了 PATH。若想省略路徑，可以在 postgres 帳號的 `~/.pgsql_profile` 加上 `export PATH=/usr/pgsql-17/bin:$PATH`（PGDG 的 `.bash_profile` 會讀這個檔）。
 - 第一次使用 PGDG 套件庫時會匯入 GPG 金鑰（指紋 `B031 F89F ... B973 8825`），之後安裝的套件都會驗證簽章；`rpm -qi` 的 `Signature` 欄位的 Key ID 和匯入的金鑰一致。
 - `dnf -qy module disable postgresql` 第一次存取各個 pgdg 套件庫時都會匯入一次金鑰，所以出現了好幾次，屬正常現象（上面只保留第一筆）。
 - 套件庫標示為 `9.8`：PGDG 依 Rocky 的 minor 版本分套件庫。**實測發現 Docker Hub 的 `rockylinux:9` 映像停在 9.3，PGDG 已經不提供 `rhel-9.3` 的套件庫，`dnf` 會因為 `repomd.xml` 404 而失敗**，所以實測改用 `rockylinux/rockylinux:9`（9.8）。實體機或 VM 只要 `dnf upgrade` 到最新的 9.x 就不會遇到。
@@ -236,7 +237,8 @@ Success. You can now start the database server using:
     /usr/pgsql-17/bin/pg_ctl -D /var/lib/pgsql/17/data/ -l logfile start
 
 
-[pg1]# runuser -u postgres -- pg_controldata /var/lib/pgsql/17/data | grep -E "pg_control version|Catalog version|checksum|Database block size|WAL block size|Bytes per WAL segment"
+[pg1]# runuser -u postgres -- /usr/pgsql-17/bin/pg_controldata /var/lib/pgsql/17/data \
+  | grep -E "pg_control version|Catalog version|checksum|Database block size|WAL block size|Bytes per WAL segment"
 pg_control version number:            1700
 Catalog version number:               202406281
 Database block size:                  8192
@@ -992,12 +994,12 @@ psql: error: connection to server at "127.0.0.1", port 5432 failed: FATAL:  pass
 容器內的數字只用來確認服務正常，**不代表正式主機的效能**：
 
 ```console
-[pg1]# PGPASSWORD=ChangeMe_App_2026 pgbench -h 127.0.0.1 -U app -i -s 20 -q appdb 2>&1 | tail -3
+[pg1]# PGPASSWORD=ChangeMe_App_2026 /usr/pgsql-17/bin/pgbench -h 127.0.0.1 -U app -i -s 20 -q appdb 2>&1 | tail -3
 vacuuming...
 creating primary keys...
 done in 1.14 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 0.85 s, vacuum 0.06 s, primary keys 0.22 s).
 
-[pg1]# PGPASSWORD=ChangeMe_App_2026 pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 30 -P 10 appdb 2>&1 | grep -vE "^pgbench \(|^starting"
+[pg1]# PGPASSWORD=ChangeMe_App_2026 /usr/pgsql-17/bin/pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 30 -P 10 appdb 2>&1 | grep -vE "^pgbench \(|^starting"
 progress: 10.0 s, 13879.2 tps, lat 1.145 ms stddev 0.585, 0 failed
 progress: 20.0 s, 13903.4 tps, lat 1.145 ms stddev 0.681, 0 failed
 progress: 30.0 s, 13391.0 tps, lat 1.189 ms stddev 0.597, 0 failed
@@ -1015,7 +1017,7 @@ latency stddev = 0.624 ms
 initial connection time = 19.023 ms
 tps = 13730.092491 (without initial connection time)
 
-[pg1]# PGPASSWORD=ChangeMe_App_2026 pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 20 -S appdb 2>&1 | grep -E "^(tps|latency average|number of transactions actually)"
+[pg1]# PGPASSWORD=ChangeMe_App_2026 /usr/pgsql-17/bin/pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 20 -S appdb 2>&1 | grep -E "^(tps|latency average|number of transactions actually)"
 number of transactions actually processed: 4169767
 latency average = 0.077 ms
 tps = 208635.344032 (without initial connection time)
@@ -1124,7 +1126,7 @@ UPDATE 1
 `track_io_timing = on` 會在每次 I/O 前後取時間，時鐘來源太慢時會拖慢查詢。`pg_test_timing` 確認每次只要約 16 ns：
 
 ```console
-[pg1]# pg_test_timing -d 1 | head -8
+[pg1]# /usr/pgsql-17/bin/pg_test_timing -d 1 | head -8
 Testing timing overhead for 1 second.
 Per loop time including overhead: 16.40 ns
 Histogram of timing durations:
