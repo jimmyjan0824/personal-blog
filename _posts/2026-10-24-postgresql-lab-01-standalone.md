@@ -54,6 +54,36 @@ Hugepagesize:       2048 kB
 | `net.core.somaxconn = 1024` | 連線尖峰時的 listen backlog |
 
 - 輸出中的 THP 是 `[always]`、`HugePages_Total: 0`：容器共用 Docker VM 的核心，無法在容器內調整。正式主機建議把 THP 設成 `never` 或 `madvise`，並依[安裝部署篇]({% post_url 2026-10-24-postgresql-ops-01-installation-config %})的方法設定 `vm.nr_hugepages` 後把 `huge_pages` 改成 `on`（**未實測**）。
+
+  暫時關閉 THP（立即生效，重開機後會恢復；**未實測**）：
+
+  ```bash
+  cat /sys/kernel/mm/transparent_hugepage/enabled
+  echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+  ```
+
+  透過 systemd 在 PostgreSQL 啟動前關閉 THP（重開機後仍有效；**未實測**）。PGDG 套件的服務名稱是 `postgresql-17.service`，所以 `Before=` 要寫這個名稱：
+
+  ```bash
+  sudo tee /etc/systemd/system/disable-thp.service <<'UNIT'
+  [Unit]
+  Description=Disable Transparent Huge Pages (THP)
+  DefaultDependencies=no
+  After=sysinit.target local-fs.target
+  Before=postgresql-17.service
+
+  [Service]
+  Type=oneshot
+  ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled && echo never > /sys/kernel/mm/transparent_hugepage/defrag'
+
+  [Install]
+  WantedBy=basic.target
+  UNIT
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now disable-thp.service
+  ```
+
 - 防火牆（**未實測**，容器內沒有 firewalld）：
 
 ```bash
