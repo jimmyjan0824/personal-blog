@@ -1250,7 +1250,26 @@ tps = 208635.344032 (without initial connection time)
 (9 rows)
 ```
 
-`Workers Launched: 4`，`max_parallel_workers_per_gather = 4` 生效。平行查詢用 `/dev/shm`（`dynamic_shared_memory_type = posix`），Docker 預設的 `/dev/shm` 只有 64 MB，實測環境把 `shm_size` 設成 1 GB；在 Kubernetes 上也要記得掛一個 `emptyDir`（`medium: Memory`）到 `/dev/shm`。
+**EXPLAIN 的選項**
+
+- `ANALYZE`：真的執行查詢，顯示實際的列數（`actual rows`）與執行次數（`loops`），不只是估算。
+- `COSTS OFF`：不顯示規劃器的成本估算（`cost=...`），讓輸出比較短。
+- `TIMING OFF`：不量每個節點的耗時，減少量測本身的開銷；整體的 `Execution Time` 仍會顯示。
+
+**執行計畫要由下往上讀**
+
+1. `Parallel Index Only Scan ... (actual rows=400000 loops=5)`：用主鍵索引平行掃描 `pgbench_accounts`。`loops=5` 代表有 5 個行程在掃（4 個 worker + leader 本身，因為 `parallel_leader_participation = on`），每個行程平均掃到 400,000 列，5 × 400,000 = 200 萬列，正好是 `-s 20` 的資料量。
+   - `Heap Fetches: 2003501`：Index Only Scan 本來可以不讀資料表，但 visibility map 還沒標記為「全部可見」的頁面仍要回表確認。剛跑完 pgbench 的大量 UPDATE，幾乎每一列都回表了；執行一次 `VACUUM pgbench_accounts` 後這個數字會大幅下降。
+2. `Partial Aggregate (actual rows=1 loops=5)`：每個行程先各自算出自己那一部分的 `count(*)`，所以 5 個行程各產生 1 列部分結果。
+3. `Gather (actual rows=5)`：leader 收集 5 個部分結果。
+   - `Workers Planned: 4`：規劃器打算用 4 個 worker。
+   - `Workers Launched: 4`：實際啟動了 4 個。兩者相同，代表 `max_parallel_workers`（8）與 `max_worker_processes`（16）的名額足夠；如果 Launched 比 Planned 少，就是當下的 worker 名額被其他查詢用完了，查詢仍會完成，只是平行度較低。
+4. `Finalize Aggregate (actual rows=1)`：把 5 個部分結果加總成最後的 1 個 `count(*)`。
+5. `Planning Time` 是產生執行計畫的時間，`Execution Time` 是實際執行的時間（72 ms 掃完 200 萬列）。
+
+**為什麼是 4 個 worker**
+
+`max_parallel_workers_per_gather = 4` 是上限，但規劃器還會依資料表大小決定要用幾個：資料表超過 `min_parallel_table_scan_size`（預設 8MB）才會考慮平行，之後大小每增加 3 倍才多 1 個 worker（8MB → 1 個、24MB → 2 個、72MB → 3 個、216MB → 4 個、648MB → 5 個）。`-s 20` 的 `pgbench_accounts` 約 260 MB，依大小算出來正好也是 4 個，所以這裡兩個條件都指向 4。表再大一點（超過約 648 MB），就會被 `max_parallel_workers_per_gather = 4` 擋在 4 個。
 
 ### 慢查詢、暫存檔、鎖等待日誌
 
