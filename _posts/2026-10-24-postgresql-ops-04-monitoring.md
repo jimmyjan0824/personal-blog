@@ -106,7 +106,7 @@ GROUP BY 1, 2, 4 ORDER BY 3 DESC;
 
 ## pg_stat_statements
 
-[Standalone 實作]({% post_url 2026-10-24-postgresql-lab-01-standalone %})的設定檔已經把它放進 `shared_preload_libraries`，每個資料庫還要 `CREATE EXTENSION pg_stat_statements;`。
+[Standalone 實作]({% post_url 2026-10-24-postgresql-lab-01-standalone %})的設定檔已經把它放進 `shared_preload_libraries`（需重啟才會開始收集），再到要查詢的資料庫執行 `CREATE EXTENSION pg_stat_statements;` 建立檢視表與函式。統計資料是整個叢集共用的（所有資料庫的 SQL 都會記錄，以 `dbid` 區分），所以通常只在 `postgres` 或監控用的資料庫建一次即可。詳細說明見 [Standalone 實作：pg_stat_statements 擴充套件是什麼]({% post_url 2026-10-24-postgresql-lab-01-standalone %}#pg_stat_statements-擴充套件是什麼)。
 
 ```sql
 -- 總耗時最多的 SQL（優化優先順序）
