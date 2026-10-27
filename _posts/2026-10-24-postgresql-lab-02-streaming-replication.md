@@ -16,9 +16,19 @@ description: 在 Rocky Linux 9 上建立 PostgreSQL 17.11 一主兩從的 Stream
 
 | 主機 | IP | 角色（初始） | 角色（切換測試後） |
 | :--- | :--- | :--- | :--- |
-| `pgs1` | 192.168.59.21 | 主庫 | 從庫（pg_rewind 後回歸） |
-| `pgs2` | 192.168.59.22 | 從庫（quorum 同步） | **主庫** |
-| `pgs3` | 192.168.59.23 | 從庫（quorum 同步） | 從庫（改接 pgs2） |
+| `pgs1` | 192.168.0.1 | 主庫 | 從庫（pg_rewind 後回歸） |
+| `pgs2` | 192.168.0.2 | 從庫（quorum 同步） | **主庫** |
+| `pgs3` | 192.168.0.3 | 從庫（quorum 同步） | 從庫（改接 pgs2） |
+
+IP 請換成自己環境的實際位址（pg_hba.conf 的複製規則也要跟著改）。後面的指令用主機名稱 `pgs1`～`pgs3` 互連，三台的 `/etc/hosts` 都要能解析（**未實測**）：
+
+```bash
+sudo tee -a /etc/hosts >/dev/null <<'HOSTS'
+192.168.0.1   pgs1
+192.168.0.2   pgs2
+192.168.0.3   pgs3
+HOSTS
+```
 
 ```text
             ┌──────────── WAL streaming（slot: pgs2）──────────► pgs2
@@ -520,15 +530,15 @@ local   all             all                                     scram-sha-256
 host    all             all             127.0.0.1/32            scram-sha-256
 host    all             all             ::1/128                 scram-sha-256
 # 複製連線：database 欄位要寫 replication（all 不包含複製連線），只允許三台資料庫主機
-host    replication     replicator      192.168.59.21/32        scram-sha-256
-host    replication     replicator      192.168.59.22/32        scram-sha-256
-host    replication     replicator      192.168.59.23/32        scram-sha-256
+host    replication     replicator      192.168.0.1/32          scram-sha-256
+host    replication     replicator      192.168.0.2/32          scram-sha-256
+host    replication     replicator      192.168.0.3/32          scram-sha-256
 # pg_rewind 要用一般連線連到新主庫的 postgres 資料庫
-host    postgres        rewind_user     192.168.59.21/32        scram-sha-256
-host    postgres        rewind_user     192.168.59.22/32        scram-sha-256
-host    postgres        rewind_user     192.168.59.23/32        scram-sha-256
+host    postgres        rewind_user     192.168.0.1/32          scram-sha-256
+host    postgres        rewind_user     192.168.0.2/32          scram-sha-256
+host    postgres        rewind_user     192.168.0.3/32          scram-sha-256
 # 應用程式網段（依實際網段修改）
-host    all             all             192.168.59.0/24         scram-sha-256
+host    all             all             192.168.0.0/24          scram-sha-256
 # 其他來源一律拒絕
 host    all             all             0.0.0.0/0               reject
 host    all             all             ::/0                    reject
@@ -676,7 +686,7 @@ active
 
 [pgs2]# sleep 2; grep -hE "standby|streaming|consistent|redo" /var/lib/pgsql/17/data/log/postgresql-*.log
 2026-10-24 15:33:39.185 CST [158] LOG:  checkpoint complete: wrote 71 buffers (0.0%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.004 s, sync=0.010 s, total=0.025 s; sync files=54, longest=0.001 s, average=0.001 s; distance=9042 kB, estimate=9042 kB; lsn=0/2000080, redo lsn=0/2000028
-2026-10-24 15:33:39.195 CST [206] replicator@[unknown]/pgs2 192.168.59.22 LOG:  standby "pgs2" is now a candidate for quorum synchronous standby
+2026-10-24 15:33:39.195 CST [206] replicator@[unknown]/pgs2 192.168.0.2 LOG:  standby "pgs2" is now a candidate for quorum synchronous standby
 2026-10-24 15:33:39.528 CST [101] LOG:  starting backup recovery with redo LSN 0/2000028, checkpoint LSN 0/2000080, on timeline ID 1
 2026-10-24 15:33:39.528 CST [101] LOG:  entering standby mode
 2026-10-24 15:33:39.529 CST [101] LOG:  redo starts at 0/2000028
@@ -693,10 +703,10 @@ active
 
 ```console
 [pgs1] postgres=# SELECT application_name, client_addr, state, sync_state, sync_priority, sent_lsn, replay_lsn, write_lag, flush_lag, replay_lag FROM pg_stat_replication ORDER BY application_name;
- application_name |  client_addr  |   state   | sync_state | sync_priority | sent_lsn  | replay_lsn |    write_lag    |    flush_lag    |   replay_lag    
-------------------+---------------+-----------+------------+---------------+-----------+------------+-----------------+-----------------+-----------------
- pgs2             | 192.168.59.22 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.007641 | 00:00:00.007641 | 00:00:00.000833
- pgs3             | 192.168.59.23 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.000123 | 00:00:00.000123 | 00:00:00.000123
+ application_name | client_addr |   state   | sync_state | sync_priority | sent_lsn  | replay_lsn |    write_lag    |    flush_lag    |   replay_lag    
+------------------+-------------+-----------+------------+---------------+-----------+------------+-----------------+-----------------+-----------------
+ pgs2             | 192.168.0.2 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.007641 | 00:00:00.007641 | 00:00:00.000833
+ pgs3             | 192.168.0.3 | streaming | quorum     |             1 | 0/4000000 | 0/4000000  | 00:00:00.000123 | 00:00:00.000123 | 00:00:00.000123
 (2 rows)
 
 
@@ -903,7 +913,7 @@ INSERT 0 1
 
 [pgs2]# sleep 3; grep -hE "terminat|could not|FATAL" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -3
 		This probably means the server terminated abnormally
-2026-10-24 15:34:20.583 CST [173] FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+2026-10-24 15:34:20.583 CST [173] FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 		This probably means the server terminated abnormally
 ```
 
@@ -1233,25 +1243,25 @@ active
 ```console
 [pgs1]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
 7
-      3 replicator@[unknown]/pgs1 192.168.59.21 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+      3 replicator@[unknown]/pgs1 192.168.0.1 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
       1 postgres@postgres/psql [local] ERROR:  cannot execute INSERT in a read-only transaction
       1 FATAL:  terminating walreceiver process due to administrator command
       1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
-      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 
 [pgs2]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
 7
-      3 replicator@[unknown]/pgs1 192.168.59.21 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
+      3 replicator@[unknown]/pgs1 192.168.0.1 ERROR:  requested starting point 0/F000000 on timeline 1 is not in this server's history
       1 postgres@postgres/psql [local] ERROR:  cannot execute INSERT in a read-only transaction
       1 FATAL:  terminating walreceiver process due to administrator command
       1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
-      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 
 [pgs3]# grep -hcE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log; grep -hE "ERROR|FATAL|WARNING|PANIC" /var/lib/pgsql/17/data/log/postgresql-*.log | sed -E "s/^[0-9-]+ [0-9:.]+ CST \[[0-9]+\] //" | sort | uniq -c | sort -rn | head -12
 4
       2 FATAL:  terminating walreceiver process due to administrator command
       1 FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
-      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.59.21), port 5432 failed: server closed the connection unexpectedly
+      1 FATAL:  could not connect to the primary server: connection to server at "pgs1" (192.168.0.1), port 5432 failed: server closed the connection unexpectedly
 ```
 
 pgs1 和 pgs2 的摘要**一模一樣**，因為 `log_directory = 'log'` 在資料目錄底下，`pg_rewind` 把它也換成了 pgs2 的版本，**pgs1 自己當機前後的日誌不見了**。事故調查需要這些日誌，所以：
