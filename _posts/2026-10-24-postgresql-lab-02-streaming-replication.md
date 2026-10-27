@@ -32,7 +32,20 @@ description: 在 Rocky Linux 9 上建立 PostgreSQL 17.11 一主兩從的 Stream
 
 ## 步驟 0：三台都做
 
-OS 參數和 Standalone 相同（`/etc/sysctl.d/99-postgresql.conf`），另外為 postgres 帳號建立 `.pgpass`，讓從庫連主庫、`pg_rewind` 連新主庫時不必在設定檔裡寫明文密碼：
+先裝 PostgreSQL 套件（和 Standalone 的「步驟 1」相同）。`postgres` 這個 OS 帳號與 `/var/lib/pgsql` 目錄是安裝 `postgresql17-server` 時才建立的，**所以一定要先裝套件**，後面的 `install -o postgres`、`sudo -u postgres` 才不會出現 `invalid user 'postgres'`：
+
+```bash
+sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf -qy module disable postgresql
+sudo dnf install -y postgresql17-server postgresql17-contrib
+
+# 確認 postgres 帳號已建立
+id postgres
+```
+
+三台都裝 `postgresql17-server`、`postgresql17-contrib`，但**只有主庫要 initdb**（步驟 1），從庫的資料目錄由 `pg_basebackup` 產生（步驟 3）。從庫在 `pg_basebackup` 之前不要 initdb，也不要啟動 `postgresql-17` 服務。
+
+接著設定 OS 參數（和 Standalone 相同），並為 postgres 帳號建立 `.pgpass`，讓從庫連主庫、`pg_rewind` 連新主庫時不必在設定檔裡寫明文密碼：
 
 ```bash
 sudo tee /etc/sysctl.d/99-postgresql.conf <<'CONF'
@@ -46,7 +59,7 @@ sudo sysctl -p /etc/sysctl.d/99-postgresql.conf
 
 sudo install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
 
-sudo -u postgres tee /var/lib/pgsql/.pgpass <<'PGPASS'
+sudo -u postgres tee /var/lib/pgsql/.pgpass >/dev/null <<'PGPASS'
 *:5432:replication:replicator:ChangeMe_Repl_2026
 *:5432:postgres:rewind_user:ChangeMe_Rewind_2026
 PGPASS
@@ -54,8 +67,6 @@ sudo chmod 600 /var/lib/pgsql/.pgpass
 ```
 
 `.pgpass` 的第三欄是資料庫名稱，複製連線要寫 `replication`。權限一定要 `600`，否則 libpq 會忽略它。
-
-PostgreSQL 套件的安裝與 Standalone 的「步驟 1」相同，三台都裝 `postgresql17-server`、`postgresql17-contrib`，**只有主庫要 initdb**，從庫的資料目錄由 `pg_basebackup` 產生。
 
 防火牆（**未實測**）：三台之間都要開 5432（從庫連主庫、切換後角色互換）。
 
