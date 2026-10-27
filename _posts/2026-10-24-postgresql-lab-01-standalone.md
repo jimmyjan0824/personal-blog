@@ -770,7 +770,7 @@ local   all             all                                     scram-sha-256
 host    all             all             127.0.0.1/32            scram-sha-256
 host    all             all             ::1/128                 scram-sha-256
 # 應用程式網段（依實際網段修改），只用 scram-sha-256，不要用 trust 或 md5
-host    all             all             192.168.59.0/24         scram-sha-256
+host    all             all             192.168.0.0/24          scram-sha-256
 # 其他來源一律拒絕（沒有符合的規則本來就會拒絕，寫出來比較清楚）
 host    all             all             0.0.0.0/0               reject
 host    all             all             ::/0                    reject
@@ -789,6 +789,30 @@ host    replication     all             ::1/128                 scram-sha-256
 ```
 
 換成上面的版本後，只有作業系統的 `postgres` 帳號能免密碼登入，其他帳號（包括本機）都要 SCRAM 密碼，應用網段之外一律拒絕。
+
+**應用程式網段怎麼寫**
+
+- 上面的範例允許 `192.168.0.1`～`192.168.0.254`（MySQL 寫法的 `192.168.0.%`）連線。pg_hba.conf **不支援 `%` 萬用字元**，要寫成 CIDR：`192.168.0.0/24`，或寫成兩欄 `192.168.0.0  255.255.255.0`。
+- 常見的對照：`192.168.%`（MySQL）→ `192.168.0.0/16`；單一主機 → `/32`。
+- 本文的實測環境是 `192.168.59.0/24`，所以後面的實測輸出裡，連線來源都是 `192.168.59.x`。
+
+**改完要檢查兩件事**
+
+1. `listen_addresses` 要包含用戶端會連的那張網卡 IP。本文設定檔是 `'192.168.59.11, localhost'`，要改成主機自己的 IP（或 `'*'`）。這個參數**要重啟**才會生效，reload 沒有用：
+
+   ```bash
+   sudo systemctl restart postgresql-17
+   sudo ss -lntp | grep 5432
+   ```
+
+2. pg_hba.conf 只要 reload。reload 前後都可以用 `pg_hba_file_rules` 檢查語法（它讀的是檔案目前的內容），有錯誤時 reload 會保留舊規則，不會套用新的：
+
+   ```bash
+   sudo -u postgres psql -X -c "SELECT line_number, type, database, user_name, address, netmask, auth_method, error FROM pg_hba_file_rules;"
+   sudo systemctl reload postgresql-17
+   ```
+
+   `error` 欄位全部是空的才算正確。然後從 `192.168.0.x` 的用戶端實際連線一次：`psql -h <主機 IP> -U app -d appdb`。
 
 ```console
 [pg1]# cd /var/lib/pgsql/17/data && cp postgresql.conf postgresql.conf.initdb && cp pg_hba.conf pg_hba.conf.initdb && install -o postgres -g postgres -m 600 /root/conf/postgresql-standalone.conf postgresql.conf && install -o postgres -g postgres -m 600 /root/conf/pg_hba-standalone.conf pg_hba.conf && ls -l postgresql.conf pg_hba.conf
