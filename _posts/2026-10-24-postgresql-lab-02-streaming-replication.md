@@ -1254,7 +1254,7 @@ pgs1 和 pgs2 的摘要**一模一樣**，因為 `log_directory = 'log'` 在資�
 
 ## 驗證方式與結果
 
-驗證環境、建置檔與 compose 檔和 [Standalone]({% post_url 2026-10-24-postgresql-lab-01-standalone %}#驗證方式與結果) 相同，`pgs1`～`pgs3` 使用已安裝 PostgreSQL 17.11（尚未 initdb）的 `pglab-rocky9-pg17` 映像。測試腳本 `tools/postgresql-lab/20-streaming.sh` 整份約 1 分 20 秒跑完，完整輸出在 `results/20-streaming.log`。
+驗證環境、建置檔與 compose 檔和 Standalone 篇相同（放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab)），`pgs1`～`pgs3` 使用已安裝 PostgreSQL 17.11（尚未 initdb）的 `pglab-rocky9-pg17` 映像。測試腳本 `tools/postgresql-lab/20-streaming.sh` 整份約 1 分 20 秒跑完，完整輸出在 `results/20-streaming.log`。
 
 | 測試 | 怎麼驗證 | 判定通過的條件 | 結果 |
 | :--- | :--- | :--- | :--- |
