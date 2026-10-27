@@ -668,7 +668,42 @@ default_text_search_config = 'pg_catalog.english'
 CONF
 ```
 
-主機規格不同時，主要調整下面這幾個，其他維持上面的值即可：
+### 記憶體參數怎麼依實體記憶體配置
+
+`shared_buffers`、`effective_cache_size`、`work_mem`、`maintenance_work_mem` 是最常需要依主機調整的四個參數。下面把**官方文件的說法**（[17 文件：Resource Consumption](https://www.postgresql.org/docs/17/runtime-config-resource.html)、[Planner Cost Constants](https://www.postgresql.org/docs/17/runtime-config-query.html#GUC-EFFECTIVE-CACHE-SIZE)）和**社群常用的經驗法則**分開列出。官方只對 `shared_buffers` 給了百分比，其他三個都只說明原理，沒有公式。
+
+| 參數 | 預設 | 官方文件的建議 | 社群經驗法則（本文採用） |
+| :--- | :--- | :--- | :--- |
+| `shared_buffers` | 128MB | 專用資料庫主機、RAM ≥ 1 GB 時，**合理的起始值是 RAM 的 25%**；因為 PostgreSQL 也依賴 OS cache，**超過 40% 不太可能更好**；RAM < 1 GB 要用更小的比例 | 25%，大記憶體主機上限抓 40% 以內 |
+| `effective_cache_size` | 4GB | 沒有百分比。要考慮 `shared_buffers` 加上 OS 會拿來快取資料檔的 page cache，並考慮同時有多少查詢在分用；**只影響規劃器估算，不配置記憶體** | RAM 的 50%～75%，專用主機抓 75% |
+| `work_mem` | 4MB | 沒有公式。它是**每個排序 / 雜湊操作**的上限，一條複雜查詢可能同時有好幾個，多個 session 又會同時執行，**總用量可能是 `work_mem` 的好幾倍**，設定時要記得這點 | (RAM − `shared_buffers`) ÷ (`max_connections` × 3)，再往下取到 8 / 16 / 32 / 64MB 這類整數 |
+| `maintenance_work_mem` | 64MB | `VACUUM`、`CREATE INDEX`、`ALTER TABLE ADD FOREIGN KEY` 使用；一個 session 同時只會跑一個，**可以安全地設得比 `work_mem` 大很多**；但 autovacuum 最多會用到 `autovacuum_max_workers` 倍，不要設太高，可另外用 `autovacuum_work_mem` 控制 | RAM 的 5% 左右，上限多設在 1GB～2GB |
+
+**`shared_buffers`**
+
+- PostgreSQL 讀寫資料都經過 `shared_buffers`，同一份資料通常也會在 OS page cache 裡（double buffering），所以不是越大越好：剩下的記憶體要留給 OS cache、每條連線的私有記憶體和 `work_mem`。
+- 官方也提醒：`shared_buffers` 調大時通常要一起調大 `max_wal_size`，讓大量髒頁分散在較長的時間寫出。本文的設定檔已經把 `max_wal_size` 從 1GB 調到 8GB。
+- 超過 8 GB 時建議設定 Huge Pages（見步驟 0）。
+
+**`effective_cache_size`**
+
+- 它只是告訴規劃器「資料大概有多少在快取裡」。設大一點，規劃器較傾向走索引掃描；設小一點，較傾向循序掃描。
+- 因為不會真的配置記憶體，設錯不會造成 OOM，只會影響執行計畫。
+
+**`work_mem`：最壞情況要自己算**
+
+- 雜湊操作（hash join、hash aggregate）的上限是 `work_mem × hash_mem_multiplier`（預設 2.0），所以實際是 2 倍。
+- 平行查詢的每個 worker 各自有一份。
+- 最壞情況約為「同時執行的連線數 × 每條查詢的排序 / 雜湊節點數 × `work_mem`（雜湊 ×2）× 平行度」。以 16 GB、200 條連線、`work_mem = 16MB` 為例：200 × 3 × 16MB ≈ 9.4 GB，加上 4 GB 的 `shared_buffers` 已經接近實體記憶體。這只是最壞情況，實際上不會每條連線都同時跑大排序，但也說明了為什麼全域值要保守。
+- 做法：全域設保守值，報表或批次查詢再用 `SET work_mem = '256MB'`（或 `ALTER ROLE report SET work_mem = '256MB'`）個別調高。判斷是否不夠：`log_temp_files` 有大量暫存檔紀錄，或 `EXPLAIN ANALYZE` 出現 `Sort Method: external merge`。
+
+**`maintenance_work_mem`**
+
+- 加大可以讓 `CREATE INDEX`、`VACUUM`、`pg_restore` 建索引更快。
+- autovacuum 的每個 worker 各自可用這麼多記憶體。本文設定 `autovacuum_max_workers = 4`、`maintenance_work_mem = 1GB`，最壞情況 autovacuum 會用到 4 GB。記憶體吃緊時，可以把 `autovacuum_work_mem` 設成 512MB 之類較小的值，手動執行的 `VACUUM` 和建索引仍然用 1GB。
+- 16 以前，VACUUM 收集 dead tuple 最多只會用到 1 GB，設更大對 VACUUM 沒有幫助。17 改用新的記憶體結構（TidStore），用量更省，也沒有這個上限。
+
+依上面的法則換算，主機規格不同時主要調整下面這幾個參數。表中 `work_mem` 以 200 條連線、OLTP 為準，其他參數維持上面的值即可：
 
 | 實體記憶體 | `shared_buffers` | `effective_cache_size` | `work_mem`（200 連線） | `maintenance_work_mem` |
 | :--- | :--- | :--- | :--- | :--- |
@@ -684,8 +719,7 @@ CONF
 | 16 | 24 | 16 | 4 | 4 |
 | 32 | 40 | 32 | 8 | 8 |
 
-- `work_mem` 的最壞情況是「連線數 × 每條查詢的排序 / 雜湊節點數 × work_mem」，表格的值以 200 條連線、OLTP 為準；連線用 PgBouncer 收斂後可以再提高。
-- `shared_buffers` 超過 8 GB 時強烈建議設定 Huge Pages。
+- 連線用 PgBouncer 收斂後，`max_connections` 變小，`work_mem` 可以再提高。
 - 機械硬碟把 `random_page_cost` 改回 4、`effective_io_concurrency` 改成 2。
 
 ### pg_hba.conf
