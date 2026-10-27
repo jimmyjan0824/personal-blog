@@ -712,6 +712,40 @@ CONF
 | 32 GB | 8GB | 24GB | 32MB | 2GB |
 | 64 GB | 16GB | 48GB | 64MB | 2GB |
 
+- 連線用 PgBouncer 收斂後，`max_connections` 變小，`work_mem` 可以再提高。
+
+### 平行查詢參數怎麼依 vCPU 配置
+
+`max_worker_processes`、`max_parallel_workers`、`max_parallel_workers_per_gather`、`max_parallel_maintenance_workers` 決定平行查詢與平行維護作業能用多少 CPU。下面同樣把**官方文件的說法**（[17 文件：Asynchronous Behavior](https://www.postgresql.org/docs/17/runtime-config-resource.html#RUNTIME-CONFIG-RESOURCE-ASYNC-BEHAVIOR)）和**社群經驗法則**分開列出。官方文件**沒有依 CPU 數給任何建議值**，只說明這幾個參數之間的關係，以及調整其中一個時要一起檢查其他幾個。
+
+| 參數 | 預設 | 範圍 | 官方文件的說明 | 社群經驗法則（本文採用） |
+| :--- | :--- | :--- | :--- | :--- |
+| `max_worker_processes` | 8 | 全叢集，需重啟 | 叢集能支援的**背景行程（background worker）總數**；從庫必須**大於或等於**主庫，否則從庫不能查詢；調整時要一起考慮下面三個參數 | `max_parallel_workers` 再加上預留名額（邏輯複製、擴充套件），至少 8 |
+| `max_parallel_workers` | 8 | 全叢集 | 全叢集**同時**能給平行作業用的 worker 上限；worker 從 `max_worker_processes` 的池子裡拿，**設得比它大沒有效果** | 等於 vCPU 數 |
+| `max_parallel_workers_per_gather` | 2 | 單一 `Gather` 節點 | 單一查詢的一個 `Gather` / `Gather Merge` 節點最多啟動幾個 worker，設 0 就關閉平行查詢；執行時 worker 不夠就用較少的 worker 跑。每個 worker 是獨立行程，**`work_mem` 等限制每個 worker 各算一份**，例如 4 個 worker 的查詢，CPU、記憶體、I/O 最多可能是非平行查詢的 5 倍 | vCPU ÷ 2，OLTP 上限 4；32 vCPU 以上、有報表查詢時可到 8 |
+| `max_parallel_maintenance_workers` | 2 | 單一維護指令 | `CREATE INDEX`（B-tree、BRIN）與 `VACUUM`（非 FULL）最多用幾個 worker。和平行查詢不同，**`maintenance_work_mem` 是整個指令共用**，不會乘上 worker 數，但 CPU 與 I/O 用量仍會增加 | vCPU ÷ 2，上限 4～8 |
+
+**四個參數的關係**
+
+```text
+max_worker_processes（背景行程總池，需重啟）
+ ├─ max_parallel_workers（其中最多幾個給平行作業）
+ │   ├─ max_parallel_workers_per_gather（單一查詢節點最多拿幾個）
+ │   └─ max_parallel_maintenance_workers（單一維護指令最多拿幾個）
+ ├─ 邏輯複製：launcher、apply worker、tablesync worker（max_logical_replication_workers，預設 4）
+ └─ 擴充套件的 background worker（例如 pg_cron、TimescaleDB）
+```
+
+- 實際上要符合 `max_parallel_workers_per_gather` ≤ `max_parallel_workers` ≤ `max_worker_processes`。PostgreSQL 不會因為設錯而拒絕啟動，只是多設的部分不會生效。
+- 執行時拿不到 worker 時，查詢不會報錯，只是用較少的 worker 跑。用 `EXPLAIN ANALYZE` 比對 `Workers Planned` 和 `Workers Launched`，如果常常不一樣，代表池子不夠大。
+- `parallel_leader_participation = on`（預設）時，leader 本身也會參與執行，所以 4 個 worker 的查詢實際會用到 5 個行程。
+- autovacuum worker（`autovacuum_max_workers`）**不從** `max_worker_processes` 的池子拿，它們有自己的名額。
+- `max_worker_processes` 預留的名額要算進邏輯複製和擴充套件：如果做邏輯複製，或裝了 pg_cron 之類會常駐 worker 的擴充套件，又把 `max_parallel_workers` 設成和 `max_worker_processes` 一樣大，平行查詢可能把池子占滿，導致邏輯複製的 worker 啟動不了。
+- 平行查詢只在資料量夠大時才會被選用（`min_parallel_table_scan_size` 預設 8MB、`min_parallel_index_scan_size` 預設 512kB），小表的 OLTP 查詢不會用到。
+- OLTP 為主、同時連線多時，每條查詢都開很多 worker 反而會搶 CPU，所以 `max_parallel_workers_per_gather` 要保守；報表或批次查詢可以在 session 用 `SET max_parallel_workers_per_gather = 8` 個別調高。
+
+依上面的法則換算，本文設定檔以 8 vCPU 為準，其他規格參考下表（`max_worker_processes` 預留 8 個名額給邏輯複製與擴充套件；4 vCPU 維持預設 8）：
+
 | vCPU | `max_worker_processes` | `max_parallel_workers` | `max_parallel_workers_per_gather` | `max_parallel_maintenance_workers` |
 | :--- | :--- | :--- | :--- | :--- |
 | 4 | 8 | 4 | 2 | 2 |
@@ -719,8 +753,7 @@ CONF
 | 16 | 24 | 16 | 4 | 4 |
 | 32 | 40 | 32 | 8 | 8 |
 
-- 連線用 PgBouncer 收斂後，`max_connections` 變小，`work_mem` 可以再提高。
-- 機械硬碟把 `random_page_cost` 改回 4、`effective_io_concurrency` 改成 2。
+另外，機械硬碟要把 `random_page_cost` 改回 4、`effective_io_concurrency` 改成 2。
 
 ### pg_hba.conf
 
