@@ -796,6 +796,34 @@ host    replication     all             ::1/128                 scram-sha-256
 - 常見的對照：`192.168.0.%`（MySQL）→ `192.168.0.0/24`；單一主機 → `/32`。
 - 本文的實測環境是 `192.168.0.1/24`，所以後面的實測輸出裡，連線來源都是 `192.168.0.x`。
 
+允許 `192.168.0.%` 網段連線的完整 pg_hba.conf（heredoc 直接覆寫，擁有者 `postgres`、權限 `600` 不變）：
+
+```bash
+sudo -u postgres tee /var/lib/pgsql/17/data/pg_hba.conf >/dev/null <<'HBA'
+# /var/lib/pgsql/17/data/pg_hba.conf（Standalone，允許 192.168.0.% 網段）
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# 本機 Unix socket：作業系統的 postgres 帳號免密碼（peer），其他帳號要密碼
+local   all             postgres                                peer
+local   all             all                                     scram-sha-256
+# 本機 TCP
+host    all             all             127.0.0.1/32            scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
+# 192.168.0.%（MySQL 寫法）= 192.168.0.0/24
+host    all             all             192.168.0.0/24          scram-sha-256
+# 同一條規則的兩欄寫法（擇一即可）：
+# host  all             all             192.168.0.0     255.255.255.0   scram-sha-256
+# 只允許單一主機：
+# host  all             all             192.168.0.100/32        scram-sha-256
+# 其他來源一律拒絕
+host    all             all             0.0.0.0/0               reject
+host    all             all             ::/0                    reject
+HBA
+sudo ls -l /var/lib/pgsql/17/data/pg_hba.conf
+```
+
+寫完依下面兩個步驟檢查，再 reload 讓設定生效。
+
 **改完要檢查兩件事**
 
 1. `listen_addresses` 要包含用戶端會連的那張網卡 IP。本文設定檔是 `'192.168.0.1, localhost'`，要改成主機自己的 IP（或 `'*'`）。這個參數**要重啟**才會生效，reload 沒有用：
