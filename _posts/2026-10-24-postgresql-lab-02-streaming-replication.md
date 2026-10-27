@@ -35,7 +35,15 @@ description: 在 Rocky Linux 9 上建立 PostgreSQL 17.11 一主兩從的 Stream
 OS 參數和 Standalone 相同（`/etc/sysctl.d/99-postgresql.conf`），另外為 postgres 帳號建立 `.pgpass`，讓從庫連主庫、`pg_rewind` 連新主庫時不必在設定檔裡寫明文密碼：
 
 ```bash
-sudo tee /etc/sysctl.d/99-postgresql.conf < 99-postgresql.conf && sudo sysctl -p /etc/sysctl.d/99-postgresql.conf
+sudo tee /etc/sysctl.d/99-postgresql.conf <<'CONF'
+# /etc/sysctl.d/99-postgresql.conf
+vm.swappiness = 1
+vm.dirty_background_bytes = 67108864
+vm.dirty_bytes = 536870912
+net.core.somaxconn = 1024
+CONF
+sudo sysctl -p /etc/sysctl.d/99-postgresql.conf
+
 sudo install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
 
 sudo -u postgres tee /var/lib/pgsql/.pgpass <<'PGPASS'
@@ -56,16 +64,16 @@ PostgreSQL 套件的安裝與 Standalone 的「步驟 1」相同，三台都裝 
 ```bash
 sudo PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" \
   /usr/pgsql-17/bin/postgresql-17-setup initdb
-sudo install -o postgres -g postgres -m 600 postgresql-streaming.conf /var/lib/pgsql/17/data/postgresql.conf
-sudo install -o postgres -g postgres -m 600 pg_hba-streaming.conf /var/lib/pgsql/17/data/pg_hba.conf
-sudo systemctl enable --now postgresql-17
 ```
+
+接著用下面兩段指令直接覆寫 `postgresql.conf` 與 `pg_hba.conf`（`sudo -u postgres tee`，擁有者維持 `postgres`、權限維持 `600`），寫完再啟動服務。
 
 ### postgresql.conf
 
 和 Standalone 的設定檔相比，只有兩處不同：`listen_addresses = '*'`（三台共用，來源由 pg_hba.conf 與防火牆限制），以及展開成「主庫端」「從庫端」兩段的複製參數。標記規則相同：「建議」是調整過的值，括號內是預設值；「預設」是 17.11 的編譯預設值（逐一核對過）。
 
-```ini
+```bash
+sudo -u postgres tee /var/lib/pgsql/17/data/postgresql.conf >/dev/null <<'CONF'
 # /var/lib/pgsql/17/data/postgresql.conf
 # PostgreSQL 17 Streaming Replication（pgs1~pgs3 共用，主庫與從庫同一份）：效能與運維設定
 # 和 Standalone 篇相同的參數不再改動，差異在「連線」的 listen_addresses 與「複製」兩段。
@@ -463,6 +471,7 @@ lc_numeric = 'C.UTF-8'
 lc_time = 'C.UTF-8'
 # initdb 產生
 default_text_search_config = 'pg_catalog.english'
+CONF
 ```
 
 複製相關參數的重點：
@@ -482,7 +491,8 @@ default_text_search_config = 'pg_catalog.english'
 
 ### pg_hba.conf
 
-```text
+```bash
+sudo -u postgres tee /var/lib/pgsql/17/data/pg_hba.conf >/dev/null <<'HBA'
 # /var/lib/pgsql/17/data/pg_hba.conf（Streaming Replication，pgs1~pgs3 共用）
 # 由上往下比對，第一筆符合的就用；改完 systemctl reload postgresql-17 即可生效
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
@@ -506,11 +516,18 @@ host    all             all             192.168.59.0/24         scram-sha-256
 # 其他來源一律拒絕
 host    all             all             0.0.0.0/0               reject
 host    all             all             ::/0                    reject
+HBA
 ```
 
 - 複製連線的 database 欄位要寫 **`replication`**，`all` 不包含複製連線。
 - 三台都列出來，因為切換後任何一台都可能是主庫。
 - `pg_rewind` 用一般連線（不是複製連線）連到新主庫的 `postgres` 資料庫。
+
+兩個設定檔寫好後啟動主庫：
+
+```bash
+sudo systemctl enable --now postgresql-17
+```
 
 設定檔載入結果（`pg_file_settings` 沒有錯誤；標「預設」的 101 個參數實際值全部等於編譯預設值，標「建議」的 48 個全部不同；`tcp_keepalives_*` 為 0 是因為檢查腳本走 Unix socket，見 Standalone 篇）：
 
