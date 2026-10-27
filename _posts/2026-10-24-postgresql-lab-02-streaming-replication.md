@@ -900,7 +900,7 @@ tps = 5387.207172 (without initial connection time)
 
 ## 測試 5：故障切換
 
-模擬主庫當機（實測環境用 `docker compose kill` 停掉 STS-DB32-1 的容器 `pgs1`，等於直接斷電），手動提升 STS-DB32-2：
+模擬主庫當機（實測環境用 `docker compose kill` 停掉 STS-DB32-1，等於直接斷電），手動提升 STS-DB32-2：
 
 ```console
 [STS-DB32-1] postgres=# INSERT INTO t_repl(note) VALUES ('last-before-crash'); SELECT count(*), pg_current_wal_lsn() FROM t_repl;
@@ -911,10 +911,10 @@ INSERT 0 1
 (1 row)
 
 
-# 主機端：date '+%F %T'; docker compose kill pgs1
+# 主機端：date '+%F %T'; docker compose kill STS-DB32-1
 2026-10-24 15:34:20
- Container postgresql-lab-pgs1-1 Killing 
- Container postgresql-lab-pgs1-1 Killed 
+ Container postgresql-lab-STS-DB32-1-1 Killing 
+ Container postgresql-lab-STS-DB32-1-1 Killed 
 
 [STS-DB32-2]# sleep 3; grep -hE "terminat|could not|FATAL" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -3
 		This probably means the server terminated abnormally
@@ -1062,9 +1062,9 @@ SELECT pg_reload_conf();
 STS-DB32-1 的機器恢復後，systemd 照設定自動啟動 PostgreSQL，而且是以**主庫**身分：
 
 ```console
-# 主機端：docker compose start pgs1
- Container postgresql-lab-pgs1-1 Starting 
- Container postgresql-lab-pgs1-1 Started 
+# 主機端：docker compose start STS-DB32-1
+ Container postgresql-lab-STS-DB32-1-1 Starting 
+ Container postgresql-lab-STS-DB32-1-1 Started 
 
 [STS-DB32-1]# sleep 5; systemctl is-active postgresql-17
 active
@@ -1288,7 +1288,7 @@ STS-DB32-1 和 STS-DB32-2 的摘要**一模一樣**，因為 `log_directory = 'l
 
 ## 驗證方式與結果
 
-驗證環境、建置檔與 compose 檔和 Standalone 篇相同（放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab)），三台（實測時的容器名稱是 `pgs1`～`pgs3`，文中改寫為 STS-DB32-1～3）使用已安裝 PostgreSQL 17.11（尚未 initdb）的 `pglab-rocky9-pg17` 映像。測試腳本 `tools/postgresql-lab/20-streaming.sh` 整份約 1 分 20 秒跑完，完整輸出在 `results/20-streaming.log`。
+驗證環境、建置檔與 compose 檔和 Standalone 篇相同（放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab)），`STS-DB32-1`～`STS-DB32-3` 使用已安裝 PostgreSQL 17.11（尚未 initdb）的 `pglab-rocky9-pg17` 映像。測試腳本 `tools/postgresql-lab/20-streaming.sh` 整份約 1 分 20 秒跑完，完整輸出在 `results/20-streaming.log`。
 
 | 測試 | 怎麼驗證 | 判定通過的條件 | 結果 |
 | :--- | :--- | :--- | :--- |
