@@ -123,7 +123,7 @@ net.core.somaxconn = 1024
 
 ### 依主機規格調整
 
-記憶體參數哪些是官方文件的建議（例如 `shared_buffers` 抓 RAM 的 25%、超過 40% 不太可能更好）、哪些是社群經驗法則，以及 `work_mem` 最壞情況的算法，整理在 [Standalone 實作：記憶體參數怎麼依實體記憶體配置]({% post_url 2026-10-24-postgresql-lab-01-standalone %}#記憶體參數怎麼依實體記憶體配置)。
+記憶體參數哪些是官方文件的建議（例如 `shared_buffers` 抓 RAM 的 25%、超過 40% 不太可能更好）、哪些是社群經驗法則，以及 `work_mem` 最壞情況的算法，整理在 [Standalone 實作：記憶體參數怎麼依實體記憶體配置]({% post_url 2026-10-24-postgresql-lab-01-standalone %}#記憶體參數怎麼依實體記憶體配置)；平行查詢參數依 vCPU 的配置見[平行查詢參數怎麼依 vCPU 配置]({% post_url 2026-10-24-postgresql-lab-01-standalone %}#平行查詢參數怎麼依-vcpu-配置)。
 
 | 實體記憶體 | `shared_buffers` | `effective_cache_size` | `work_mem`（200 連線） | `maintenance_work_mem` |
 | :--- | :--- | :--- | :--- | :--- |
