@@ -1135,7 +1135,17 @@ psql: error: connection to server at "127.0.0.1", port 5432 failed: FATAL:  pass
 CREATE EXTENSION pg_stat_statements;
 ```
 
-- 統計資料是**整個叢集共用**的，包含所有資料庫的 SQL（用 `dbid` 欄位區分）。`CREATE EXTENSION` 只是決定在哪個資料庫**能查**，不必每個資料庫都建；常見做法是在 `postgres` 或監控用的資料庫建一次即可。
+- 統計資料是**整個叢集共用**的，包含所有資料庫的 SQL（用 `dbid` 欄位區分）。但 `pg_stat_statements` 這個檢視表**只存在於執行過 `CREATE EXTENSION` 的資料庫**，所以：
+  - 要嘛連到建立過的那個資料庫去查（例如 `\c postgres`），一個地方就能看到全部資料庫的 SQL；
+  - 要嘛在你習慣連的每個資料庫都執行一次 `CREATE EXTENSION pg_stat_statements;`。
+- 在沒有建立的資料庫查詢，會得到下面的錯誤，**不是**沒有收集統計，只是這個資料庫裡沒有檢視表：
+
+  ```text
+  appdb=# SELECT ... FROM pg_stat_statements ...;
+  ERROR:  relation "pg_stat_statements" does not exist
+  ```
+
+  解法是在該資料庫用 superuser（`postgres`）執行 `CREATE EXTENSION pg_stat_statements;`，不需要重啟。
 - 確認是否已建立：`\dx`（psql）或 `SELECT * FROM pg_extension;`。
 
 常用查詢：
