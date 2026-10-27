@@ -119,7 +119,7 @@ SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;
 
 ```bash
 sudo dnf install -y pg_repack_17
-pg_repack -h 127.0.0.1 -U postgres -d appdb -t app.orders --wait-timeout=30 -j 4
+/usr/pgsql-17/bin/pg_repack -h 127.0.0.1 -U postgres -d appdb -t app.orders --wait-timeout=30 -j 4
 ```
 
 需要表上有主鍵或非 NULL 的唯一索引，並預留一份表大小的磁碟空間。
