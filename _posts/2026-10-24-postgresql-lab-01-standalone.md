@@ -1166,14 +1166,30 @@ SELECT pg_stat_statements_reset();
 
 ### pgbench
 
-容器內的數字只用來確認服務正常，**不代表正式主機的效能**：
+`pgbench` 是 PostgreSQL 內建的壓力測試工具（`postgresql17-contrib` 提供）。這一段有兩個目的：用多條連線同時讀寫，確認服務和上面的設定在併發下正常運作（`0 failed`）；同時產生 SQL 流量，讓最後一個查詢能看到 `pg_stat_statements` 確實在收集統計。容器內的數字只用來確認服務正常，**不代表正式主機的效能**。
+
+每個指令上方的註解說明參數；`PGPASSWORD=...` 只是讓範例不必互動輸入密碼，正式環境請改用 `~/.pgpass`。
 
 ```console
+# 1) 初始化測試資料
+#   -h 127.0.0.1   用 TCP 連到本機（走 pg_hba.conf 的 host 規則，要密碼）
+#   -U app         以 app 帳號連線
+#   -i             initialize：建立 pgbench_accounts / branches / tellers / history 四張表並灌資料
+#   -s 20          scale factor：資料量倍數，每 1 倍 = 100,000 筆 accounts，20 倍 = 200 萬筆（約 300 MB）
+#   -q             quiet：每 5 秒才印一次進度，不要每 10 萬筆印一次
+#   appdb          目標資料庫
+#   2>&1 | tail -3 pgbench 的訊息輸出在 stderr，合併後只看最後 3 行
 [pg1]# PGPASSWORD=ChangeMe_App_2026 /usr/pgsql-17/bin/pgbench -h 127.0.0.1 -U app -i -s 20 -q appdb 2>&1 | tail -3
 vacuuming...
 creating primary keys...
 done in 1.14 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 0.85 s, vacuum 0.06 s, primary keys 0.22 s).
 
+# 2) 讀寫混合測試（預設腳本 TPC-B：每筆交易 3 個 UPDATE、1 個 SELECT、1 個 INSERT）
+#   -c 16          clients：同時 16 條連線（模擬 16 個使用者）
+#   -j 4           jobs：pgbench 用 4 個執行緒驅動這 16 條連線（每個執行緒負責 4 條）
+#   -T 30          執行 30 秒（或用 -t N 指定每條連線跑 N 筆交易）
+#   -P 10          每 10 秒印一次進度（progress 行：當下的 tps、延遲、失敗數）
+#   grep -vE ...   拿掉版本與 starting vacuum 等開頭訊息，只留結果
 [pg1]# PGPASSWORD=ChangeMe_App_2026 /usr/pgsql-17/bin/pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 30 -P 10 appdb 2>&1 | grep -vE "^pgbench \(|^starting"
 progress: 10.0 s, 13879.2 tps, lat 1.145 ms stddev 0.585, 0 failed
 progress: 20.0 s, 13903.4 tps, lat 1.145 ms stddev 0.681, 0 failed
@@ -1192,11 +1208,17 @@ latency stddev = 0.624 ms
 initial connection time = 19.023 ms
 tps = 13730.092491 (without initial connection time)
 
+# 3) 唯讀測試
+#   -c 16 -j 4     同上：16 條連線、4 個執行緒
+#   -T 20          執行 20 秒
+#   -S             select-only：內建的唯讀腳本，每筆交易只有一個 SELECT abalance FROM pgbench_accounts WHERE aid = ?
+#   grep -E ...    只看交易數、平均延遲與 tps 三行
 [pg1]# PGPASSWORD=ChangeMe_App_2026 /usr/pgsql-17/bin/pgbench -h 127.0.0.1 -U app -c 16 -j 4 -T 20 -S appdb 2>&1 | grep -E "^(tps|latency average|number of transactions actually)"
 number of transactions actually processed: 4169767
 latency average = 0.077 ms
 tps = 208635.344032 (without initial connection time)
 
+# 4) 在 appdb 查 pg_stat_statements，確認上面的 SQL 都被記錄下來（依總耗時排序前 5 名）
 [pg1] appdb=# SELECT left(query, 60) AS query, calls, round(mean_exec_time::numeric, 3) AS mean_ms, round(total_exec_time::numeric) AS total_ms FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 5;
                             query                             |  calls  | mean_ms | total_ms 
 --------------------------------------------------------------+---------+---------+----------
@@ -1208,7 +1230,7 @@ tps = 208635.344032 (without initial connection time)
 (5 rows)
 ```
 
-`pg_stat_statements` 已經在收集統計，排在第一的 `UPDATE pgbench_branches` 是 TPC-B 的熱點列（scale 20 只有 20 列 branches，16 條連線搶同一批列的鎖）。
+讀寫混合約 13,700 tps、0 筆失敗，唯讀約 20 萬 tps。`pg_stat_statements` 已經在收集統計，排在第一的 `UPDATE pgbench_branches` 是 TPC-B 的熱點列（scale 20 只有 20 列 branches，16 條連線搶同一批列的鎖）。
 
 ### 平行查詢
 
