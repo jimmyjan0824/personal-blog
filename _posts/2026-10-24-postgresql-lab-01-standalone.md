@@ -279,16 +279,16 @@ drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_xact
 
 ## 步驟 3：設定檔
 
-先備份 initdb 產生的設定檔，再換成下面兩個檔案：
+先備份 initdb 產生的設定檔，再用下面兩段指令直接寫入新的內容：
 
 ```bash
 sudo install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
 cd /var/lib/pgsql/17/data
 sudo cp postgresql.conf postgresql.conf.initdb
 sudo cp pg_hba.conf pg_hba.conf.initdb
-sudo install -o postgres -g postgres -m 600 postgresql-standalone.conf postgresql.conf
-sudo install -o postgres -g postgres -m 600 pg_hba-standalone.conf pg_hba.conf
 ```
+
+兩段都用 `sudo -u postgres tee` 覆寫 initdb 產生的檔案，擁有者維持 `postgres`、權限維持 `600`。整段（從 `sudo -u postgres tee` 到結尾的 `CONF` / `HBA`）一起貼上執行。
 
 ### postgresql.conf
 
@@ -297,7 +297,8 @@ sudo install -o postgres -g postgres -m 600 pg_hba-standalone.conf pg_hba.conf
 > PGDG 的 initdb 產生的 postgresql.conf 有幾個值和編譯預設值不同：`logging_collector = on`、`log_filename = 'postgresql-%a.log'`、`log_rotation_size = 0`、`log_truncate_on_rotation = on`、`timezone` / `log_timezone = 'Etc/UTC'`。下面的設定檔是整份取代，所以這些參數都明確寫出來。
 {: .prompt-info }
 
-```ini
+```bash
+sudo -u postgres tee /var/lib/pgsql/17/data/postgresql.conf >/dev/null <<'CONF'
 # /var/lib/pgsql/17/data/postgresql.conf
 # PostgreSQL 17 Standalone：效能與運維設定
 # 以「16 GB RAM、8 vCPU、SSD、專用 PostgreSQL 主機、OLTP 為主」為基準。
@@ -664,6 +665,7 @@ lc_numeric = 'C.UTF-8'
 lc_time = 'C.UTF-8'
 # initdb 產生
 default_text_search_config = 'pg_catalog.english'
+CONF
 ```
 
 主機規格不同時，主要調整下面這幾個，其他維持上面的值即可：
@@ -688,7 +690,8 @@ default_text_search_config = 'pg_catalog.english'
 
 ### pg_hba.conf
 
-```text
+```bash
+sudo -u postgres tee /var/lib/pgsql/17/data/pg_hba.conf >/dev/null <<'HBA'
 # /var/lib/pgsql/17/data/pg_hba.conf（Standalone）
 # 由上往下比對，第一筆符合的就用；改完 systemctl reload postgresql-17 即可生效
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
@@ -704,6 +707,7 @@ host    all             all             192.168.59.0/24         scram-sha-256
 # 其他來源一律拒絕（沒有符合的規則本來就會拒絕，寫出來比較清楚）
 host    all             all             0.0.0.0/0               reject
 host    all             all             ::/0                    reject
+HBA
 ```
 
 initdb 預設產生的 pg_hba.conf 只允許本機連線，而且 `local` 對**所有帳號**都用 `peer`：
