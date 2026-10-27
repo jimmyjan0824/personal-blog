@@ -77,6 +77,11 @@ sudo PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 -
   /usr/pgsql-17/bin/postgresql-17-setup initdb
 ```
 
+> **主庫已經照 Standalone 篇建好、正在執行？跳過上面的 initdb。** initdb 只用在全新、空的資料目錄；`postgresql-17-setup` 看到資料目錄已有資料會直接拒絕（`Data directory is not empty!`），不會清空既有資料。Standalone 篇的 initdb 參數和這裡相同（含 `--data-checksums`，`pg_rewind` 需要它），可以直接沿用。接下來只要：
+>
+> 1. 用下面兩段指令覆寫 `postgresql.conf` 與 `pg_hba.conf`。和 Standalone 篇的差異是 `listen_addresses`（`'*'`）、複製參數，以及 pg_hba.conf 多了複製連線與 `pg_rewind` 的規則。pg_hba.conf 是整份覆寫，Standalone 篇另外加的應用程式網段規則（例如 `192.168.0.0/24`）要一起寫進去，否則那些連線會被拒絕。
+> 2. 用 `sudo systemctl restart postgresql-17` 重啟，不是 `enable --now`（服務已經在執行，`enable --now` 不會重新載入設定）。`listen_addresses`、`max_wal_senders` 等參數都要重啟才生效，reload 不夠。
+
 接著用下面兩段指令直接覆寫 `postgresql.conf` 與 `pg_hba.conf`（`sudo -u postgres tee`，擁有者維持 `postgres`、權限維持 `600`），寫完再啟動服務。
 
 ### postgresql.conf
@@ -538,6 +543,9 @@ HBA
 
 ```bash
 sudo systemctl enable --now postgresql-17
+
+# 主庫沿用 Standalone 篇、服務已在執行的話，改用重啟
+# sudo systemctl restart postgresql-17
 ```
 
 實測的啟動結果：
