@@ -292,7 +292,7 @@ sudo cp pg_hba.conf pg_hba.conf.initdb
 
 ### postgresql.conf
 
-每個參數上一行的註解：標「建議」的是調整過的值，括號內是預設值；標「預設」的是 17 的預設值。「預設」指的是 PostgreSQL 的**編譯預設值**（`pg_settings.boot_val`），在全新安裝的 17.11 上逐一核對過（方法見文末「驗證方式與結果」）。寫出來是為了讓設定一目了然，日後要調整時知道從哪裡開始。
+每個參數上一行的註解：標「建議」的是調整過的值，括號內是預設值；標「預設」的是 17 的預設值。「預設」指的是 PostgreSQL 的**編譯預設值**（`pg_settings.boot_val`），在全新安裝的 17.11 上逐一核對過。寫出來是為了讓設定一目了然，日後要調整時知道從哪裡開始。
 
 > PGDG 的 initdb 產生的 postgresql.conf 有幾個值和編譯預設值不同：`logging_collector = on`、`log_filename = 'postgresql-%a.log'`、`log_rotation_size = 0`、`log_truncate_on_rotation = on`、`timezone` / `log_timezone = 'Etc/UTC'`。下面的設定檔是整份取代，所以這些參數都明確寫出來。
 {: .prompt-info }
@@ -1389,104 +1389,11 @@ Histogram of timing durations:
 
 整個測試過程只有刻意製造的密碼錯誤。
 
-## 實測踩到的坑
-
-| 現象 | 原因 | 解法 |
-| :--- | :--- | :--- |
-| `Failed to download metadata for repo 'pgdg18'`、`repomd.xml` 404 | Docker Hub 的 `rockylinux:9` 停在 9.3，PGDG 已不提供 9.3 的套件庫 | 用 `rockylinux/rockylinux:9`；實體機 `dnf upgrade` 到最新 9.x |
-| 檢查腳本顯示 `tcp_keepalives_*` 為 0 | Unix socket 連線不適用 TCP keepalive | 用 TCP 連線查詢 |
-| 檢查腳本找不到 `timezone`、`datestyle` | `pg_settings` 裡的名稱是 `TimeZone`、`DateStyle`（大小寫不同；設定檔不分大小寫） | 比對時用 `lower(name)` |
-| 平行查詢可能出現 `could not resize shared memory segment` | Docker / Kubernetes 的 `/dev/shm` 預設只有 64 MB | `shm_size: 1gb` 或掛記憶體型的 `emptyDir`（實測直接設大，沒有重現錯誤） |
-
-## 驗證方式與結果
-
-**驗證環境**
-
-| 項目 | 內容 |
-| :--- | :--- |
-| 主機 | MacBook Air M4（Mac16,12），macOS 15.7.4 |
-| 容器 | Docker Desktop 4.96.3（Engine 29.9.2），VM 10 CPU / 約 7.7 GB |
-| 作業系統 | `rockylinux/rockylinux:9` 映像（Rocky Linux 9.8）+ systemd |
-| PostgreSQL | 17.11-1PGDG.rhel9.8（比較用 18.6-1PGDG.rhel9.8），PGDG 套件庫 |
-| 架構 | aarch64 |
-
-每台主機是一個 privileged 容器，以 `/usr/sbin/init`（systemd）為 PID 1，所以 `systemctl`、`Type=notify` 都是真實流程。`pg1` 是只有 systemd 的乾淨 Rocky 9.8，步驟 0～5 全部在容器裡照文章執行。建置檔與腳本放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab)：
-
-```dockerfile
-# Rocky Linux 9.8 + systemd（還沒裝 PostgreSQL）：給 pg1 現場照「步驟 1」安裝用
-# 注意：Docker Hub 的 rockylinux:9 停在 9.3，PGDG 已不支援，要用 rockylinux/rockylinux:9
-FROM rockylinux/rockylinux:9
-RUN mkdir -p /etc/sysctl.d \
- && dnf install -y systemd procps-ng iproute hostname which less vim-minimal tzdata diffutils \
- && dnf clean all \
- && systemctl mask systemd-logind.service getty.target console-getty.service
-STOPSIGNAL SIGRTMIN+3
-CMD ["/usr/sbin/init"]
-```
-
-```dockerfile
-# Rocky Linux 9.8 + systemd + 依「步驟 1」用 PGDG 套件庫安裝 PostgreSQL 17（Streaming Replication 節點用，尚未 initdb）
-FROM pglab-rocky9-base
-ARG PG_MAJOR=17
-RUN dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm \
- && dnf -qy module disable postgresql \
- && dnf install -y postgresql${PG_MAJOR}-server postgresql${PG_MAJOR}-contrib \
- && dnf clean all
-```
-
-```yaml
-# pg1：Standalone；pgs1~pgs3：Streaming Replication（1 主 2 從）
-x-node: &node
-  image: pglab-rocky9-pg17
-  pull_policy: never
-  privileged: true            # systemd 當 PID 1、sysctl 需要
-  cgroup: host
-  shm_size: "1gb"             # Docker 預設 /dev/shm 只有 64MB，平行查詢的 dynamic shared memory 會不夠
-  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro", "./bin:/root/bin:ro"]
-  tmpfs: ["/run", "/run/lock"]
-  extra_hosts:
-    - "pg1:192.168.0.1"
-    - "pgs1:192.168.0.21"
-    - "pgs2:192.168.0.22"
-    - "pgs3:192.168.0.23"
-services:
-  pg1:  { <<: *node, image: pglab-rocky9-base, hostname: pg1,  networks: { labnet: { ipv4_address: 192.168.0.1 } } }
-  pgs1: { <<: *node, hostname: pgs1, networks: { labnet: { ipv4_address: 192.168.0.21 } } }
-  pgs2: { <<: *node, hostname: pgs2, networks: { labnet: { ipv4_address: 192.168.0.22 } } }
-  pgs3: { <<: *node, hostname: pgs3, networks: { labnet: { ipv4_address: 192.168.0.23 } } }
-networks:
-  labnet:
-    ipam: { config: [ { subnet: 192.168.0.0/24, gateway: 192.168.0.254 } ] }
-```
-
-想自己重現的話，把 `tools/postgresql-lab` 整個資料夾複製下來，依序執行 `./00-build.sh`、`./10-standalone.sh`（Streaming Replication 是 `20-`，17 vs 18 的補充驗證是 `30-`），輸出會記錄在 `results/`。
-
-**設定檔的「建議 / 預設」標記怎麼驗證**：`bin/checkconf.sh` 讀取設定檔，依每個參數上一行註解的標記，和 `pg_settings` 比對。標「預設」的參數，實際值必須等於 `boot_val`（編譯預設值）；標「建議」的參數，實際值必須和 `boot_val` 不同；同時檢查 `pg_file_settings` 沒有錯誤。
-
-**驗證項目**
-
-| 步驟 | 怎麼驗證 | 判定通過的條件 | 結果 |
-| :--- | :--- | :--- | :--- |
-| 1 安裝 | `rpm -qi`、`postgres --version`、`pg_config --configure` | 17.11、簽章 Key ID 與 PGDG 金鑰一致、有 lz4 / systemd | ✅ |
-| 2 initdb | `pg_controldata`、`pg_database` | checksums 開啟、builtin locale | ✅ |
-| 3 設定檔 | `checkconf.sh` | 沒有錯誤、預設值標記正確 | ✅ 預設 91 項全部一致；建議 46 項全部與預設不同（`tcp_keepalives_*` 另以 TCP 確認） |
-| 4 啟動 | `systemctl status`、日誌 | `active (running)`、`ready to accept connections`、沒有 WARNING | ✅ |
-| 5 認證 | SCRAM 密碼、錯誤密碼 | 正確密碼可登入、錯誤密碼被拒並記錄規則行號 | ✅ |
-| 5 效能參數 | 平行查詢、pgbench | `Workers Launched: 4`、pgbench 沒有失敗交易 | ✅ |
-| 5 日誌 | 慢查詢、暫存檔、鎖等待 | 三種日誌都有紀錄 | ✅ |
-| 5 歸檔 | `pg_switch_wal()`、`pg_stat_archiver` | `failed_count = 0` | ✅ |
-| 5 持久化 | `systemctl restart` | 資料筆數不變 | ✅ |
-| 預設值 | 17.11 與 18.6 全新 initdb 後匯出 `pg_settings` | 用來標註設定檔與版本比較 | ✅ 17：384 個參數；18：404 個 |
-
-**錯誤處理紀錄**（對應上方「實測踩到的坑」）：
-
-- `rockylinux:9` 的 PGDG 404：第一次檢查版本時就遇到，改用 9.8 的映像後通過。
-- 檢查腳本：第一次跑時 `TimeZone`、`DateStyle` 顯示 UNKNOWN，改成不分大小寫比對；`tcp_keepalives_*` 確認是連線方式造成，另外用 TCP 連線驗證。
-- 容器映像沒有 `/etc/sysctl.d` 目錄，在建置檔裡補上（實體機本來就有）。
-
 ## 版本差異比較：17.11 vs 18.6
 
 同一台 `pg1` 上另外安裝 18.6，用相同參數 initdb，**這份 17 的 postgresql.conf 在 18 上可以直接啟動**，`pg_file_settings` 沒有錯誤：
+
+（下面的 `checkconf.sh` 是實測用的檢查腳本，放在 [GitHub](https://github.com/jimmyjan0824/personal-blog/tree/main/tools/postgresql-lab/bin)，用 `pg_file_settings` 與 `pg_settings` 比對設定檔與實際值。）
 
 ```console
 [pg1]# runuser -u postgres -- /usr/pgsql-18/bin/initdb -D /var/lib/pgsql/18/data --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8 2>&1 | grep -Ev "^$"
