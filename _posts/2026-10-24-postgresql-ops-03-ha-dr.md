@@ -53,7 +53,7 @@ PostgreSQL 的高可用建立在 **WAL 串流複製（Streaming Replication）**
 
 ```ini
 # 任 1 台確認即可（quorum），比 FIRST 1 更能容忍單一從庫故障或變慢
-synchronous_standby_names = 'ANY 1 (pgs1, pgs2, pgs3)'
+synchronous_standby_names = 'ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")'
 ```
 
 名稱對應的是從庫連線的 `application_name`。實測中要特別注意兩件事：

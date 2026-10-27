@@ -137,7 +137,7 @@ SELECT slot_name, active, wal_status,
 FROM pg_replication_slots ORDER BY restart_lsn;
 
 -- 確認那台從庫不會回來了，才刪除
-SELECT pg_drop_replication_slot('pgs3');
+SELECT pg_drop_replication_slot('sts_db32_3');
 ```
 
 ## 磁碟滿
