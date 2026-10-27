@@ -1274,6 +1274,7 @@ tps = 208635.344032 (without initial connection time)
 ### 慢查詢、暫存檔、鎖等待日誌
 
 ```console
+-- 1) 慢查詢：故意睡 1.2 秒，超過 log_min_duration_statement = 1s，日誌會留下 duration
 [pg1] appdb=# SELECT pg_sleep(1.2);
  pg_sleep 
 ----------
@@ -1281,6 +1282,11 @@ tps = 208635.344032 (without initial connection time)
 (1 row)
 
 
+-- 2) 暫存檔：故意讓排序「放不進記憶體」，用來測試暫存檔（temp file）的行為
+--    SET work_mem = '1MB'          只在這個 session 把排序可用的記憶體調到 1MB（設定檔是 16MB）
+--    ORDER BY abalance, filler     對 200 萬列排序；filler 是 84 字元的欄位，讓每列變大、排序資料量更大
+--    SELECT count(*) FROM (...) t  只回傳筆數，避免把 200 萬列印到畫面上
+--    排序超過 work_mem 就寫到 base/pgsql_tmp/，log_temp_files = 0 會把每個暫存檔都記到日誌
 [pg1] appdb=# SET work_mem = '1MB'; SELECT count(*) FROM (SELECT aid FROM pgbench_accounts ORDER BY abalance, filler) t;
 SET
   count  
@@ -1289,9 +1295,12 @@ SET
 (1 row)
 
 
+# 3) 鎖等待：背景的交易鎖住 pgbench_branches 3 秒，0.5 秒後另一個 UPDATE 去搶同一張表，
+#    等待超過 deadlock_timeout（1 秒）時 log_lock_waits = on 會記錄 still waiting / acquired
 [pg1]# (runuser -u postgres -- psql -X -d appdb -c "BEGIN; LOCK pgbench_branches; SELECT pg_sleep(3); COMMIT;" >/dev/null 2>&1 &) ; sleep 0.5; runuser -u postgres -- psql -X -d appdb -c "UPDATE pgbench_branches SET bbalance = bbalance WHERE bid = 1;"
 UPDATE 1
 
+# 4) 從日誌撈出上面三種紀錄
 [pg1]# grep -E "duration: [0-9]{4}|temporary file|still waiting|acquired" /var/lib/pgsql/17/data/log/postgresql-*.log | tail -8
 2026-10-24 15:19:31.284 CST [1023] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp1023.0", size 40574976
 2026-10-24 15:19:31.284 CST [1024] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp1024.0", size 41910272
@@ -1303,7 +1312,7 @@ UPDATE 1
 2026-10-24 15:19:34.453 CST [1038] postgres@appdb/psql [local] LOG:  duration: 2554.201 ms  statement: UPDATE pgbench_branches SET bbalance = bbalance WHERE bid = 1;
 ```
 
-- `log_temp_files = 0`：`work_mem` 只有 1MB 時排序落到暫存檔，平行的 worker 各自寫了一個檔。
+- `log_temp_files = 0`：`work_mem` 只有 1MB 時排序落到暫存檔，平行的 worker 各自寫了一個檔（每個約 40 MB）。除了看日誌，也可以用 `SELECT datname, temp_files, pg_size_pretty(temp_bytes) FROM pg_stat_database;` 看每個資料庫累計產生了多少暫存檔。
 - `log_lock_waits = on`：等鎖超過 1 秒（`deadlock_timeout`）就記錄 `still waiting`，取得鎖時再記一筆 `acquired`。
 - `log_min_duration_statement = 1s`：超過 1 秒的 SQL 都留下 `duration`。
 
