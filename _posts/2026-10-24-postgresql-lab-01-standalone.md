@@ -284,9 +284,11 @@ drwx------  2 postgres postgres  4096 Oct 24 07:18 pg_xact
 ```bash
 sudo install -d -o postgres -g postgres -m 700 /var/lib/pgsql/17/archive
 cd /var/lib/pgsql/17/data
-sudo cp postgresql.conf postgresql.conf.initdb
-sudo cp pg_hba.conf pg_hba.conf.initdb
+sudo -u postgres cp -p postgresql.conf postgresql.conf.initdb
+sudo -u postgres cp -p pg_hba.conf pg_hba.conf.initdb
 ```
+
+備份檔放在資料目錄裡，**一定要用 `sudo -u postgres` 複製**，讓擁有者維持 `postgres`。如果用 root 複製（`sudo cp`），檔案會變成 root 擁有、權限 600，之後 `pg_basebackup`（建立從庫）以 postgres 身分讀資料目錄時會失敗：`could not open file "./postgresql.conf.initdb": Permission denied`。
 
 兩段都用 `sudo -u postgres tee` 覆寫 initdb 產生的檔案，擁有者維持 `postgres`、權限維持 `600`。整段（從 `sudo -u postgres tee` 到結尾的 `CONF` / `HBA`）一起貼上執行。
 
