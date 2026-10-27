@@ -1318,7 +1318,15 @@ UPDATE 1
 
 ### WAL 歸檔與重啟
 
+這一段驗證兩件事：
+
+1. **WAL 歸檔有在運作**。設定檔開了 `archive_mode = on`，`archive_command` 會把寫滿的 WAL 檔（每個 16 MB）複製到 `/var/lib/pgsql/17/archive`。歸檔是 PITR（還原到任一時間點）與建立從庫的基礎；如果 `archive_command` 一直失敗，WAL 會堆在 `pg_wal` 裡不會被刪除，最後可能把磁碟塞滿，所以上線前一定要確認它真的成功。
+2. **重啟服務後資料還在**。`shared_buffers`、`max_connections` 這類參數要重啟才會生效，這裡實際重啟一次，確認設定檔可以正常啟動，前面 pgbench 寫入的資料也都還在。
+
 ```console
+-- 1) 強制切換 WAL 檔：把目前還沒寫滿的 WAL 段落結束掉，換下一個檔案，
+--    結束的那個檔就會交給 archive_command 歸檔（不用等寫滿 16 MB）
+--    回傳值 0/1AF48BA8 是切換當下的 WAL 位置（LSN）
 [pg1] postgres=# SELECT pg_switch_wal();
  pg_switch_wal 
 ---------------
@@ -1326,11 +1334,17 @@ UPDATE 1
 (1 row)
 
 
+# 2) 等 2 秒讓歸檔完成，再看歸檔目錄最新的 3 個檔案：
+#    每個 16777216 bytes（16 MB），最後一個 ...1A 就是剛剛切換掉的 WAL 檔
 [pg1]# sleep 2; ls -l /var/lib/pgsql/17/archive | tail -3
 -rw------- 1 postgres postgres 16777216 Oct 24 07:19 000000010000000000000018
 -rw------- 1 postgres postgres 16777216 Oct 24 07:19 000000010000000000000019
 -rw------- 1 postgres postgres 16777216 Oct 24 07:19 00000001000000000000001A
 
+-- 3) 從統計檢視確認歸檔狀態
+--    archived_count     啟動以來成功歸檔的 WAL 檔數量
+--    last_archived_wal  最後一個成功歸檔的檔名，要和上面 ls 看到的最新檔案一致
+--    failed_count       歸檔失敗次數，必須是 0；不為 0 時看 last_failed_wal 與日誌找原因
 [pg1] postgres=# SELECT archived_count, last_archived_wal, failed_count FROM pg_stat_archiver;
  archived_count |    last_archived_wal     | failed_count 
 ----------------+--------------------------+--------------
@@ -1340,11 +1354,15 @@ UPDATE 1
 
 
 ======== 重啟後資料仍在 ========  (2026-10-24 15:19:36)
+# 4) 重啟服務後馬上數 pgbench_accounts 的筆數，應該還是 pgbench -s 20 灌進去的 200 萬筆
 [pg1]# systemctl restart postgresql-17 && runuser -u postgres -- psql -X -d appdb -Atc "SELECT count(*) FROM pgbench_accounts"
 2000000
 ```
 
-`failed_count = 0`，歸檔正常；重啟後 200 萬筆資料都在。
+- `failed_count = 0`，`last_archived_wal` 和歸檔目錄裡最新的檔案相同：歸檔正常。
+- 重啟後 200 萬筆資料都在，服務也用這份設定檔正常啟動。
+- 這裡是 `systemctl restart`（正常關機，會先做 checkpoint），驗證的是「重啟不掉資料」；異常斷電後的復原則是靠 WAL 重放（crash recovery），本文沒有另外測試。
+- 正式環境建議用 pgBackRest 或 WAL-G 取代 `cp`，並把歸檔放到另一台主機或物件儲存。
 
 ### 時鐘開銷
 
