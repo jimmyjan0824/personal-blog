@@ -651,9 +651,28 @@ sudo ls -A /var/lib/pgsql/17/data | wc -l
 
 ```bash
 # 在主庫 STS-DB32-1 執行
+
+# 1. 列出主庫上所有 replication slot：active = t 表示正在被從庫使用，f 表示沒有連線在用
 sudo -u postgres psql -X -c "SELECT slot_name, active FROM pg_replication_slots;"
+
+# 2. 刪除 sts_db32_2（只能刪 active = f 的 slot；正在使用中的 slot 會報錯 is active for PID）
+#    要刪 STS-DB32-3 的 slot，把 sts_db32_2 換成 sts_db32_3
 sudo -u postgres psql -X -c "SELECT pg_drop_replication_slot('sts_db32_2');"
+
+# 3. 確認已刪除：回傳 (0 rows) 才正確
+sudo -u postgres psql -X -c "SELECT slot_name FROM pg_replication_slots WHERE slot_name = 'sts_db32_2';"
 ```
+
+刪除時的輸出如下，`pg_drop_replication_slot` 回傳空白一列表示成功：
+
+```console
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+```
+
+slot 刪掉之後，回到從庫清空資料目錄，再重新執行 `pg_basebackup`。
 
 資料目錄清空後再執行 `pg_basebackup`：
 
