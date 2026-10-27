@@ -1120,6 +1120,40 @@ psql: error: connection to server at "127.0.0.1", port 5432 failed: FATAL:  pass
 - 密碼以 `SCRAM-SHA-256$` 開頭儲存。
 - 錯誤密碼被拒絕，日誌的 `DETAIL` 會指出是 pg_hba.conf 的哪一行規則，排查連線問題很好用。
 
+#### pg_stat_statements 擴充套件是什麼
+
+`pg_stat_statements` 是 PostgreSQL 內建（contrib 套件 `postgresql17-contrib`）的擴充套件，會記錄每一種 SQL 的執行次數、總耗時、平均耗時、讀取的區塊數等，用來找出最耗資源的 SQL，作用類似 MySQL 的 `performance_schema.events_statements_summary_by_digest`。啟用分成兩步，缺一不可：
+
+```sql
+-- 第 1 步（設定檔，需重啟）：讓伺服器啟動時載入模組，開始收集統計
+--   shared_preload_libraries = 'pg_stat_statements'
+--   沒有這一步，第 2 步雖然能建立，查詢時會出現
+--   ERROR: pg_stat_statements must be loaded via "shared_preload_libraries"
+
+-- 第 2 步（SQL）：在「目前連線的資料庫」建立 pg_stat_statements 檢視表與相關函式，
+-- 這樣才查得到統計結果。本文在 appdb 執行，所以要連到 appdb 才查得到
+CREATE EXTENSION pg_stat_statements;
+```
+
+- 統計資料是**整個叢集共用**的，包含所有資料庫的 SQL（用 `dbid` 欄位區分）。`CREATE EXTENSION` 只是決定在哪個資料庫**能查**，不必每個資料庫都建；常見做法是在 `postgres` 或監控用的資料庫建一次即可。
+- 確認是否已建立：`\dx`（psql）或 `SELECT * FROM pg_extension;`。
+
+常用查詢：
+
+```sql
+-- 總耗時最多的前 10 個 SQL（最值得優化的對象）
+SELECT left(query, 80) AS query, calls,
+       round(total_exec_time::numeric) AS total_ms,
+       round(mean_exec_time::numeric, 2) AS mean_ms,
+       rows
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 10;
+
+-- 清空統計，重新開始累計（例如調整索引後要比較前後差異）
+SELECT pg_stat_statements_reset();
+```
+
 ### pgbench
 
 容器內的數字只用來確認服務正常，**不代表正式主機的效能**：
