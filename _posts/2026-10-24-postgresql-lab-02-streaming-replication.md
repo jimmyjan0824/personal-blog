@@ -33,7 +33,7 @@ HOSTS
 主機名稱裡有大寫和 `-`，命名時要注意兩條規則：
 
 - **replication slot 名稱只能用小寫英文、數字與底線**，所以 slot 名稱用 `sts_db32_1`～`sts_db32_3`，不能直接用主機名稱。
-- `application_name` 可以直接用主機名稱，但寫進 `synchronous_standby_names` 時，含 `-` 的名稱要用**雙引號**括起來，例如 `"STS-DB32-2"`；比對時不分大小寫。
+- `application_name` 可以直接用主機名稱，但寫進 `synchronous_standby_names` 時，含 `-` 的名稱要用**雙引號**括起來，例如 `"STS-DB32-2"`；比對時不分大小寫。在 postgresql.conf 裡直接寫 `'ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")'`，**不需要反斜線跳脫**；只有在 shell 的 `psql -c "..."` 雙引號字串裡，才要寫成 `\"` 讓 shell 把雙引號原樣傳給 psql。不加雙引號的 `ANY 1 (STS-DB32-1, ...)` 會因為 `-` 解析失敗。
 
 ```text
                   ┌──────── WAL streaming（slot: sts_db32_2）────────► STS-DB32-2
