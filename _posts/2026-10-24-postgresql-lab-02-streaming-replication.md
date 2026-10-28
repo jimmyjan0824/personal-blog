@@ -684,6 +684,19 @@ sudo -iu postgres /usr/pgsql-17/bin/pg_basebackup \
 sudo systemctl enable --now postgresql-17
 ```
 
+> `pg_basebackup` 要以 **postgres** 身分執行（上面的 `sudo -iu postgres`）。下方實測輸出的提示字元 `$` 代表 postgres 使用者、`#` 代表 root。如果直接用 root 執行，會遇到兩個問題：
+>
+> 1. **要求輸入 replicator 密碼**：密碼放在 postgres 家目錄的 `/var/lib/pgsql/.pgpass`，root 執行時不會讀它。輸入步驟 2 設定的 replicator 密碼即可繼續。若用 postgres 執行還是要求密碼，檢查 `.pgpass` 是否為 postgres 擁有、權限 `600`。
+> 2. **資料目錄的檔案變成 root 擁有**：postgresql-17 服務以 postgres 身分執行，會啟動失敗。啟動服務前要先修正擁有者與權限（見下方指令）。
+{: .prompt-warning }
+
+```bash
+# 只有以 root 執行 pg_basebackup 時才需要：啟動服務前把資料目錄改回 postgres 擁有、權限 700
+sudo chown -R postgres:postgres /var/lib/pgsql/17/data
+sudo chmod 700 /var/lib/pgsql/17/data
+sudo systemctl enable --now postgresql-17
+```
+
 | 選項 | 說明 |
 | :--- | :--- |
 | `-d '... application_name=STS-DB32-2'` | 連線字串裡的 `application_name` 會寫進 `primary_conninfo`，要和 `synchronous_standby_names` 的名稱對應 |
