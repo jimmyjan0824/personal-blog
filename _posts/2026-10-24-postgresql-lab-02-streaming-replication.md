@@ -803,6 +803,34 @@ active
 - `safe_wal_size` 約 50 GB，就是 `max_slot_wal_keep_size` 的上限。
 - 從庫上 `SHOW synchronous_standby_names` 也是同一個值，切換成主庫後直接生效。
 
+### sync_state 顯示 async 怎麼辦
+
+`sync_state = async` 表示主庫認為這台從庫**不在** `synchronous_standby_names` 名單裡。最常見的原因是主庫的 `synchronous_standby_names` 是空的，例如主庫沿用 Standalone 篇的設定，沒有覆寫成本篇的 postgresql.conf。在主庫依序檢查：
+
+```bash
+# 1. 目前生效的值：空白就是全部非同步
+sudo -u postgres psql -X -c "SHOW synchronous_standby_names;"
+
+# 2. 值從哪裡來：postgresql.auto.conf（ALTER SYSTEM 寫的）會蓋過 postgresql.conf
+sudo -u postgres psql -X -c "SELECT name, setting, sourcefile, sourceline FROM pg_settings WHERE name = 'synchronous_standby_names';"
+
+# 3. 設定檔有沒有語法錯誤（有錯的那行不會生效）
+sudo -u postgres psql -X -c "SELECT sourcefile, sourceline, name, error FROM pg_file_settings WHERE error IS NOT NULL;"
+
+# 4. 從庫實際用的 application_name（要和名單裡的名稱相同，不分大小寫）
+sudo -u postgres psql -X -c "SELECT application_name, sync_state FROM pg_stat_replication;"
+```
+
+值是空的就補上設定。`synchronous_standby_names` **reload 就會生效，不用重啟**：
+
+```bash
+sudo -u postgres psql -X -c "ALTER SYSTEM SET synchronous_standby_names = 'ANY 1 (\"STS-DB32-1\", \"STS-DB32-2\", \"STS-DB32-3\")';"
+sudo -u postgres psql -X -c "SELECT pg_reload_conf();"
+sudo -u postgres psql -X -c "SELECT application_name, sync_state FROM pg_stat_replication;"
+```
+
+`ALTER SYSTEM` 會寫進 `postgresql.auto.conf`；也可以改 postgresql.conf 那一行後執行 `pg_reload_conf()`，效果相同。名稱含 `-` 一定要加雙引號，少了雙引號整行會解析失敗，從庫就會維持 async。
+
 ## 測試 1、2：主庫寫入、從庫唯讀
 
 ```console
