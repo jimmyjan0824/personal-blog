@@ -40,7 +40,8 @@ vm.dirty_background_bytes = 67108864
 vm.dirty_bytes = 536870912
 net.core.somaxconn = 1024
 
-[pg1]# cat /sys/kernel/mm/transparent_hugepage/enabled; grep -E "HugePages_Total|Hugepagesize" /proc/meminfo
+[pg1]# cat /sys/kernel/mm/transparent_hugepage/enabled
+[pg1]# grep -E "HugePages_Total|Hugepagesize" /proc/meminfo
 [always] madvise never
 HugePages_Total:       0
 Hugepagesize:       2048 kB
@@ -114,7 +115,8 @@ Installed size: 20 k
 Installed:
   pgdg-redhat-repo-42.0-70.rhel9PGDG.noarch                                     
 Complete!
-[pg1]# dnf -qy module disable postgresql; dnf repolist --enabled | grep -i pgdg
+[pg1]# dnf -qy module disable postgresql
+[pg1]# dnf repolist --enabled | grep -i pgdg
 Importing GPG key 0xB9738825:
  Userid     : "PostgreSQL RPM Repository <pgsql-pkg-yum@lists.postgresql.org>"
  Fingerprint: B031 F89F C983 E982 6290 6B6E 177B 343B B973 8825
@@ -142,7 +144,8 @@ Key imported successfully
 Installed:
 Complete!
 
-[pg1]# rpm -q postgresql17 postgresql17-libs postgresql17-server postgresql17-contrib; rpm -qi postgresql17-server | grep -E "^(Version|Release|Signature)"
+[pg1]# rpm -q postgresql17 postgresql17-libs postgresql17-server postgresql17-contrib
+[pg1]# rpm -qi postgresql17-server | grep -E "^(Version|Release|Signature)"
 postgresql17-17.11-1PGDG.rhel9.8.aarch64
 postgresql17-libs-17.11-1PGDG.rhel9.8.aarch64
 postgresql17-server-17.11-1PGDG.rhel9.8.aarch64
@@ -151,7 +154,9 @@ Version     : 17.11
 Release     : 1PGDG.rhel9.8
 Signature   : RSA/SHA256, Tue Aug 11 21:20:36 2026, Key ID 177b343bb9738825
 
-[pg1]# /usr/pgsql-17/bin/postgres --version; which psql; psql --version
+[pg1]# /usr/pgsql-17/bin/postgres --version
+[pg1]# which psql
+[pg1]# psql --version
 postgres (PostgreSQL) 17.11
 /usr/pgsql-17/bin/psql
 psql (PostgreSQL) 17.11
@@ -179,7 +184,8 @@ PGDG 的編譯選項（決定了能不能用 lz4、zstd、ICU、JIT、systemd �
 '--with-systemd'
 '--with-system-tzdata=/usr/share/zoneinfo'
 
-[pg1]# id postgres; ls -ld /var/lib/pgsql /var/lib/pgsql/17 /var/lib/pgsql/17/data
+[pg1]# id postgres
+[pg1]# ls -ld /var/lib/pgsql /var/lib/pgsql/17 /var/lib/pgsql/17/data
 uid=26(postgres) gid=26(postgres) groups=26(postgres)
 drwx------ 3 postgres postgres 4096 Oct 24 07:18 /var/lib/pgsql
 drwx------ 4 postgres postgres 4096 Oct 24 07:18 /var/lib/pgsql/17
@@ -202,7 +208,8 @@ sudo PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 -
 | `--encoding=UTF8 --locale=C.UTF-8` | `lc_messages` 等也用 C.UTF-8，錯誤訊息維持英文，方便搜尋 |
 
 ```console
-[pg1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb && cat /var/lib/pgsql/17/initdb.log
+[pg1]# PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 --locale-provider=builtin --builtin-locale=C.UTF-8" /usr/pgsql-17/bin/postgresql-17-setup initdb
+[pg1]# cat /var/lib/pgsql/17/initdb.log
 Initializing database ... OK
 
 The files belonging to this database system will be owned by user "postgres".
@@ -917,7 +924,8 @@ Created symlink /etc/systemd/system/multi-user.target.wants/postgresql-17.servic
              ├─767 /usr/pgsql-17/bin/postgres -D /var/lib/pgsql/17/data/
              ├─768 "postgres: logger "
 
-[pg1]# ls /var/lib/pgsql/17/data/log/; cat /var/lib/pgsql/17/data/log/postgresql-*.log
+[pg1]# ls /var/lib/pgsql/17/data/log/
+[pg1]# cat /var/lib/pgsql/17/data/log/postgresql-*.log
 postgresql-2026-10-24.log
 2026-10-24 15:18:36.397 CST [767] LOG:  starting PostgreSQL 17.11 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit
 2026-10-24 15:18:36.397 CST [767] LOG:  listening on IPv4 address "192.168.0.1", port 5432
@@ -1112,7 +1120,8 @@ CREATE EXTENSION
 (1 row)
 
 
-[pg1]# PGPASSWORD=wrong psql -X -h 127.0.0.1 -U app -d appdb -c "SELECT 1"; tail -2 /var/lib/pgsql/17/data/log/postgresql-*.log
+[pg1]# PGPASSWORD=wrong psql -X -h 127.0.0.1 -U app -d appdb -c "SELECT 1"
+[pg1]# tail -2 /var/lib/pgsql/17/data/log/postgresql-*.log
 psql: error: connection to server at "127.0.0.1", port 5432 failed: FATAL:  password authentication failed for user "app"
 2026-10-24 15:18:37.437 CST [881] app@appdb/[unknown] 127.0.0.1 FATAL:  password authentication failed for user "app"
 2026-10-24 15:18:37.437 CST [881] app@appdb/[unknown] 127.0.0.1 DETAIL:  Connection matched file "/var/lib/pgsql/17/data/pg_hba.conf" line 9: "host    all             all             127.0.0.1/32            scram-sha-256"
@@ -1289,7 +1298,8 @@ tps = 208635.344032 (without initial connection time)
 --    ORDER BY abalance, filler     對 200 萬列排序；filler 是 84 字元的欄位，讓每列變大、排序資料量更大
 --    SELECT count(*) FROM (...) t  只回傳筆數，避免把 200 萬列印到畫面上
 --    排序超過 work_mem 就寫到 base/pgsql_tmp/，log_temp_files = 0 會把每個暫存檔都記到日誌
-[pg1] appdb=# SET work_mem = '1MB'; SELECT count(*) FROM (SELECT aid FROM pgbench_accounts ORDER BY abalance, filler) t;
+[pg1] appdb=# SET work_mem = '1MB';
+[pg1] appdb=# SELECT count(*) FROM (SELECT aid FROM pgbench_accounts ORDER BY abalance, filler) t;
 SET
   count  
 ---------
@@ -1299,7 +1309,9 @@ SET
 
 # 3) 鎖等待：背景的交易鎖住 pgbench_branches 3 秒，0.5 秒後另一個 UPDATE 去搶同一張表，
 #    等待超過 deadlock_timeout（1 秒）時 log_lock_waits = on 會記錄 still waiting / acquired
-[pg1]# (runuser -u postgres -- psql -X -d appdb -c "BEGIN; LOCK pgbench_branches; SELECT pg_sleep(3); COMMIT;" >/dev/null 2>&1 &) ; sleep 0.5; runuser -u postgres -- psql -X -d appdb -c "UPDATE pgbench_branches SET bbalance = bbalance WHERE bid = 1;"
+[pg1]# (runuser -u postgres -- psql -X -d appdb -c "BEGIN; LOCK pgbench_branches; SELECT pg_sleep(3); COMMIT;" >/dev/null 2>&1 &)
+[pg1]# sleep 0.5
+[pg1]# runuser -u postgres -- psql -X -d appdb -c "UPDATE pgbench_branches SET bbalance = bbalance WHERE bid = 1;"
 UPDATE 1
 
 # 4) 從日誌撈出上面三種紀錄
@@ -1338,7 +1350,8 @@ UPDATE 1
 
 # 2) 等 2 秒讓歸檔完成，再看歸檔目錄最新的 3 個檔案：
 #    每個 16777216 bytes（16 MB），最後一個 ...1A 就是剛剛切換掉的 WAL 檔
-[pg1]# sleep 2; ls -l /var/lib/pgsql/17/archive | tail -3
+[pg1]# sleep 2
+[pg1]# ls -l /var/lib/pgsql/17/archive | tail -3
 -rw------- 1 postgres postgres 16777216 Oct 24 07:19 000000010000000000000018
 -rw------- 1 postgres postgres 16777216 Oct 24 07:19 000000010000000000000019
 -rw------- 1 postgres postgres 16777216 Oct 24 07:19 00000001000000000000001A
@@ -1357,7 +1370,8 @@ UPDATE 1
 
 ======== 重啟後資料仍在 ========  (2026-10-24 15:19:36)
 # 4) 重啟服務後馬上數 pgbench_accounts 的筆數，應該還是 pgbench -s 20 灌進去的 200 萬筆
-[pg1]# systemctl restart postgresql-17 && runuser -u postgres -- psql -X -d appdb -Atc "SELECT count(*) FROM pgbench_accounts"
+[pg1]# systemctl restart postgresql-17
+[pg1]# runuser -u postgres -- psql -X -d appdb -Atc "SELECT count(*) FROM pgbench_accounts"
 2000000
 ```
 
@@ -1431,7 +1445,12 @@ Success. You can now start the database server using:
 pg_control version number:            1800
 Catalog version number:               202506291
 Data page checksum version:           1
-[pg1]# install -d -o postgres -g postgres -m 700 /var/lib/pgsql/18/archive; cd /var/lib/pgsql/18/data && sed -e "s#/var/lib/pgsql/17/#/var/lib/pgsql/18/#g" -e "s/^port = 5432/port = 5433/" -e "s/^listen_addresses = .*/listen_addresses = 'localhost'/" /root/conf/postgresql-standalone.conf > postgresql.conf && chown postgres: postgresql.conf && runuser -u postgres -- /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -l /var/lib/pgsql/18/startup.log -w start; cat /var/lib/pgsql/18/startup.log
+[pg1]# install -d -o postgres -g postgres -m 700 /var/lib/pgsql/18/archive
+[pg1]# cd /var/lib/pgsql/18/data
+[pg1]# sed -e "s#/var/lib/pgsql/17/#/var/lib/pgsql/18/#g" -e "s/^port = 5432/port = 5433/" -e "s/^listen_addresses = .*/listen_addresses = 'localhost'/" /root/conf/postgresql-standalone.conf > postgresql.conf
+[pg1]# chown postgres: postgresql.conf
+[pg1]# runuser -u postgres -- /usr/pgsql-18/bin/pg_ctl -D /var/lib/pgsql/18/data -l /var/lib/pgsql/18/startup.log -w start
+[pg1]# cat /var/lib/pgsql/18/startup.log
 waiting for server to start.... done
 server started
 2026-10-24 15:19:45.386 CST [1302] LOG:  redirecting log output to logging collector process
