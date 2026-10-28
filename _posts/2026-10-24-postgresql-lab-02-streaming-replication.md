@@ -103,6 +103,9 @@ sudo PGSETUP_INITDB_OPTIONS="--data-checksums --encoding=UTF8 --locale=C.UTF-8 -
 
 和 Standalone 的設定檔相比，只有兩處不同：`listen_addresses = '*'`（三台共用，來源由 pg_hba.conf 與防火牆限制），以及展開成「主庫端」「從庫端」兩段的複製參數。標記規則相同：「建議」是調整過的值，括號內是預設值；「預設」是 17.11 的編譯預設值（逐一核對過）。
 
+> **記得修改 `synchronous_standby_names` 的主機名稱**：下面設定檔裡的 `'ANY 1 ("STS-DB32-1", "STS-DB32-2", "STS-DB32-3")'` 是本文環境的主機名稱，貼上前請改成自己三台的名稱，並且和各從庫 `pg_basebackup` 時設定的 `application_name` 完全一致（不分大小寫）。名稱含 `-` 要加雙引號。名稱對不上時，從庫的 `sync_state` 會一直是 `async`，等於沒有同步複製（見步驟 4 的「sync_state 顯示 async 怎麼辦」）。
+{: .prompt-warning }
+
 ```bash
 sudo -u postgres tee /var/lib/pgsql/17/data/postgresql.conf >/dev/null <<'CONF'
 # /var/lib/pgsql/17/data/postgresql.conf
