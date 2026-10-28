@@ -599,7 +599,13 @@ GRANT EXECUTE ON FUNCTION pg_catalog.pg_ls_dir(text, boolean, boolean) TO rewind
 GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_file(text, boolean) TO rewind_user;
 GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text) TO rewind_user;
 GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_binary_file(text, bigint, bigint, boolean) TO rewind_user;
+
+-- 後面測試用的資料表，建在 postgres 資料庫（node 欄位記錄寫入時所在主機的 IP）
+CREATE TABLE t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now());
+INSERT INTO t_repl(note) VALUES ('before-standby');
 ```
+
+以上 SQL 在主庫 STS-DB32-1 用 `sudo -u postgres psql` 登入後執行（預設連到 `postgres` 資料庫）。
 
 > **實測踩到的坑**：第一次執行時沒有 `SET synchronous_commit = local`，`CREATE ROLE` 就一直卡住不回應。原因是設定檔一開始就有 `synchronous_standby_names`，主庫等不到任何從庫確認。兩種做法：像上面一樣在初始設定期間 `SET synchronous_commit = local`，或是先把 `synchronous_standby_names` 留空，等從庫都接上再設定並 `pg_reload_conf()`。
 {: .prompt-danger }
@@ -832,6 +838,14 @@ sudo -u postgres psql -X -c "SELECT application_name, sync_state FROM pg_stat_re
 `ALTER SYSTEM` 會寫進 `postgresql.auto.conf`；也可以改 postgresql.conf 那一行後執行 `pg_reload_conf()`，效果相同。名稱含 `-` 一定要加雙引號，少了雙引號整行會解析失敗，從庫就會維持 async。
 
 ## 測試 1、2：主庫寫入、從庫唯讀
+
+測試用的 `t_repl` 表在步驟 2 建立，位於 `postgres` 資料庫。如果出現 `relation "t_repl" does not exist`，表示還沒建表，或連到了別的資料庫（例如 `appdb`）。先在**主庫**建表，從庫會自動複製過去，不用在從庫建：
+
+```bash
+# 在主庫 STS-DB32-1 執行
+sudo -u postgres psql -X -c "CREATE TABLE IF NOT EXISTS t_repl (id bigserial PRIMARY KEY, note text, node text DEFAULT inet_server_addr()::text, ts timestamptz DEFAULT now());"
+sudo -u postgres psql -X -c "INSERT INTO t_repl(note) VALUES ('before-standby');"
+```
 
 ```console
 [STS-DB32-1] postgres=# INSERT INTO t_repl(note) SELECT 'row-' || g FROM generate_series(1, 1000) g; SELECT count(*) FROM t_repl;
