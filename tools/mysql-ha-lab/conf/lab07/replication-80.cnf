@@ -1,0 +1,25 @@
+# /etc/my.cnf.d/replication.cnf（8.0 時期：Lab 01 GTID + Lab 02 半同步 + Lab 03 WRITESET，再加上 8.0 環境很常見的相容設定）
+[mysqld]
+bind_address             = 0.0.0.0
+log_bin                  = mysql-bin
+binlog_format            = ROW
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+log_replica_updates      = ON
+binlog_expire_logs_seconds = 604800
+sync_binlog              = 1
+relay_log                = relay-bin
+relay_log_recovery       = ON
+replica_parallel_workers = 8
+replica_preserve_commit_order = ON
+binlog_transaction_dependency_tracking = WRITESET      # Lab 03：8.0 要用 WRITESET 只能這樣設
+
+# Lab 02：半同步（新名稱外掛）
+plugin_load_add = semisync_source.so
+plugin_load_add = semisync_replica.so
+loose_rpl_semi_sync_source_enabled = ON
+loose_rpl_semi_sync_source_timeout = 1000
+loose_rpl_semi_sync_replica_enabled = ON
+
+# 8.0 環境常見：為了舊版驅動（PHP 7.x、舊 JDBC）把新帳號預設改回 mysql_native_password
+default_authentication_plugin = mysql_native_password

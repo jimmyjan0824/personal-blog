@@ -1,0 +1,88 @@
+
+======== 主機環境 ========  (2026-11-20 13:32:46)
+# 主機端：uname -srm; nproc; free -g | head -2; docker version --format '{{.Server.Version}} {{.Server.Arch}}'
+Linux 6.18.44-fc-v726 x86_64
+4
+               total        used        free      shared  buff/cache   available
+Mem:              15           0          10           0           4          15
+29.10.0 amd64
+
+docker.io/rockylinux/rockylinux:9
+
+======== docker build mysqllab-ps80（Percona Server 8.0.46-37.1） ========  (2026-11-20 13:32:47)
+#11 exporting manifest list sha256:d34c227ba3ee4905fd81e094c3fe13c0123ac14b9a2932d8eaf6f6ab8f74cca8 done
+#11 naming to docker.io/library/mysqllab-ps80:latest done
+#11 unpacking to docker.io/library/mysqllab-ps80:latest
+#11 unpacking to docker.io/library/mysqllab-ps80:latest 9.7s done
+#11 DONE 53.8s
+
+real	1m31.712s
+user	0m0.320s
+sys	0m0.225s
+
+======== docker build mysqllab-ps84（Percona Server 8.4.11-12.1 + XtraBackup 8.4） ========  (2026-11-20 13:34:19)
+#11 exporting manifest list sha256:5b80ebade3a64a08c9825a9d85532535411ab177116af0529f8a087d26d0d4e4 done
+#11 naming to docker.io/library/mysqllab-ps84:latest done
+#11 unpacking to docker.io/library/mysqllab-ps84:latest
+#11 unpacking to docker.io/library/mysqllab-ps84:latest 12.3s done
+#11 DONE 68.8s
+
+real	1m51.715s
+user	0m0.328s
+sys	0m0.304s
+
+======== mysqllab-ps80 內容 ========  (2026-11-20 13:36:11)
+Rocky Linux release 9.9 (Blue Onyx)
+x86_64
+percona-icu-data-files-8.0.46-37.1.el9.x86_64
+percona-mysql-router-8.0.46-37.1.el9.x86_64
+percona-mysql-shell-8.0.46-1.el9.x86_64
+percona-release-1.0-34.noarch
+percona-server-client-8.0.46-37.1.el9.x86_64
+percona-server-server-8.0.46-37.1.el9.x86_64
+percona-server-shared-8.0.46-37.1.el9.x86_64
+percona-telemetry-agent-1.0.21-1.el9.x86_64
+/usr/sbin/mysqld  Ver 8.0.46-37 for Linux on x86_64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
+mysqlsh   Ver 8.0.46 for Linux on x86_64 - for MySQL 8.0.46-37 (Source distribution)
+MySQL Router  Ver 8.0.46-37 for Linux on x86_64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
+bash: line 1: xtrabackup: command not found
+
+======== mysqllab-ps84 內容 ========  (2026-11-20 13:36:12)
+Rocky Linux release 9.9 (Blue Onyx)
+x86_64
+percona-icu-data-files-8.4.11-12.1.el9.x86_64
+percona-mysql-router-8.4.11-12.1.el9.x86_64
+percona-mysql-shell-8.4.10-2.el9.x86_64
+percona-release-1.0-34.noarch
+percona-server-client-8.4.11-12.1.el9.x86_64
+percona-server-server-8.4.11-12.1.el9.x86_64
+percona-server-shared-8.4.11-12.1.el9.x86_64
+percona-telemetry-agent-1.0.21-1.el9.x86_64
+percona-xtrabackup-84-8.4.0-7.1.el9.x86_64
+/usr/sbin/mysqld  Ver 8.4.11-12 for Linux on x86_64 (Percona Server (GPL), Release 12, Revision 76aa4263)
+mysqlsh   Ver 8.4.10 for Linux on x86_64 - for MySQL 8.4.11-11 (Source distribution)
+MySQL Router  Ver 8.4.11-12 for Linux on x86_64 (Percona Server (GPL), Release 12, Revision 76aa4263)
+xtrabackup version 8.4.0-7 based on MySQL server 8.4.0 Linux (x86_64) (revision id: 4093cfd8)
+
+======== 各套件庫可用的最新版本 ========  (2026-11-20 13:36:13)
+== ps80
+percona-server-server.x86_64      8.0.43-34.1.el9      ps-80-release-x86_64     
+percona-server-server.x86_64      8.0.44-35.1.el9      ps-80-release-x86_64     
+percona-server-server.x86_64      8.0.45-36.1.el9      ps-80-release-x86_64     
+percona-server-server.x86_64      8.0.46-37.1.el9      ps-80-release-x86_64     
+== ps-84-lts
+percona-server-server.x86_64      8.4.8-8.1.el9        ps-84-lts-release-x86_64 
+percona-server-server.x86_64      8.4.10-10.1.el9      ps-84-lts-release-x86_64 
+percona-server-server.x86_64      8.4.11-11.1.el9      ps-84-lts-release-x86_64 
+percona-server-server.x86_64      8.4.11-12.1.el9      ps-84-lts-release-x86_64 
+== ps-97-lts
+Installed Packages
+percona-mysql-shell.x86_64        8.4.10-2.el9         @ps-84-lts-release-x86_64
+percona-server-server.x86_64      8.4.11-12.1.el9      @ps-84-lts-release-x86_64
+== pxb
+percona-xtrabackup-97.x86_64             9.7.1-1.rc1.el9 pxb-97-lts-release-x86_64 
+percona-xtrabackup-97.x86_64             9.7.2-2.1.el9   pxb-97-lts-release-x86_64 
+percona-xtrabackup-97-debuginfo.x86_64   9.7.1-1.rc1.el9 pxb-97-lts-release-x86_64 
+percona-xtrabackup-97-debuginfo.x86_64   9.7.2-2.1.el9   pxb-97-lts-release-x86_64 
+percona-xtrabackup-97-debugsource.x86_64 9.7.1-1.rc1.el9 pxb-97-lts-release-x86_64 
+percona-xtrabackup-97-debugsource.x86_64 9.7.2-2.1.el9   pxb-97-lts-release-x86_64 

@@ -1,0 +1,200 @@
+
+======== 環境 ========  (2026-11-20 13:47:11)
+[db1]# cat /etc/rocky-release; uname -m; rpm -qa | grep -i percona | sort; mysqld --version
+Rocky Linux release 9.9 (Blue Onyx)
+x86_64
+percona-icu-data-files-8.0.46-37.1.el9.x86_64
+percona-mysql-router-8.0.46-37.1.el9.x86_64
+percona-mysql-shell-8.0.46-1.el9.x86_64
+percona-release-1.0-34.noarch
+percona-server-client-8.0.46-37.1.el9.x86_64
+percona-server-server-8.0.46-37.1.el9.x86_64
+percona-server-shared-8.0.46-37.1.el9.x86_64
+percona-telemetry-agent-1.0.21-1.el9.x86_64
+/usr/sbin/mysqld  Ver 8.0.46-37 for Linux on x86_64 (Percona Server (GPL), Release 37, Revision 39e2b60e)
+
+
+======== 步驟 0-1：三台放設定檔、啟動、改 root 密碼 ========  (2026-11-20 13:47:12)
+[db1]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf;  cp /root/conf/00-server.cnf /etc/my.cnf.d/00-server.cnf && cp /root/conf/lab07/replication-80.cnf /etc/my.cnf.d/replication.cnf && printf '[mysqld]\nserver_id   = 1\nreport_host = db1\n' > /etc/my.cnf.d/server-id.cnf && ls /etc/my.cnf.d
+00-server.cnf
+replication.cnf
+server-id.cnf
+
+[db1]# systemctl enable --now mysqld && systemctl is-active mysqld
+Created symlink /etc/systemd/system/mysql.service → /usr/lib/systemd/system/mysqld.service.
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqld.service → /usr/lib/systemd/system/mysqld.service.
+active
+
+[db1]# TMP=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}'); mysql --connect-expired-password -uroot -p"$TMP" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'ChangeMe_Root_2026';" 2>&1 | grep -v Warning; printf '[client]\nuser=root\npassword="ChangeMe_Root_2026"\n' > /root/.my.cnf; chmod 600 /root/.my.cnf; echo root password set
+root password set
+
+[db2]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf;  cp /root/conf/00-server.cnf /etc/my.cnf.d/00-server.cnf && cp /root/conf/lab07/replication-80.cnf /etc/my.cnf.d/replication.cnf && printf '[mysqld]\nserver_id   = 2\nreport_host = db2\n' > /etc/my.cnf.d/server-id.cnf && ls /etc/my.cnf.d
+00-server.cnf
+replication.cnf
+server-id.cnf
+
+[db2]# systemctl enable --now mysqld && systemctl is-active mysqld
+Created symlink /etc/systemd/system/mysql.service → /usr/lib/systemd/system/mysqld.service.
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqld.service → /usr/lib/systemd/system/mysqld.service.
+active
+
+[db2]# TMP=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}'); mysql --connect-expired-password -uroot -p"$TMP" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'ChangeMe_Root_2026';" 2>&1 | grep -v Warning; printf '[client]\nuser=root\npassword="ChangeMe_Root_2026"\n' > /root/.my.cnf; chmod 600 /root/.my.cnf; echo root password set
+root password set
+
+[db3]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf;  cp /root/conf/00-server.cnf /etc/my.cnf.d/00-server.cnf && cp /root/conf/lab07/replication-80.cnf /etc/my.cnf.d/replication.cnf && printf '[mysqld]\nserver_id   = 3\nreport_host = db3\n' > /etc/my.cnf.d/server-id.cnf && ls /etc/my.cnf.d
+00-server.cnf
+replication.cnf
+server-id.cnf
+
+[db3]# systemctl enable --now mysqld && systemctl is-active mysqld
+Created symlink /etc/systemd/system/mysql.service → /usr/lib/systemd/system/mysqld.service.
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqld.service → /usr/lib/systemd/system/mysqld.service.
+active
+
+[db3]# TMP=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}'); mysql --connect-expired-password -uroot -p"$TMP" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'ChangeMe_Root_2026';" 2>&1 | grep -v Warning; printf '[client]\nuser=root\npassword="ChangeMe_Root_2026"\n' > /root/.my.cnf; chmod 600 /root/.my.cnf; echo root password set
+root password set
+
+[db1] mysql> SELECT @@hostname, @@version, @@default_authentication_plugin, @@binlog_transaction_dependency_tracking, @@rpl_semi_sync_source_enabled, @@replica_parallel_workers\G
+*************************** 1. row ***************************
+                              @@hostname: db1
+                               @@version: 8.0.46-37
+         @@default_authentication_plugin: mysql_native_password
+@@binlog_transaction_dependency_tracking: WRITESET
+          @@rpl_semi_sync_source_enabled: 1
+              @@replica_parallel_workers: 8
+
+[db1] mysql> SELECT user, host, plugin FROM mysql.user WHERE user NOT LIKE 'mysql.%' ORDER BY user;
++-------------------+-----------+-----------------------+
+| user              | host      | plugin                |
++-------------------+-----------+-----------------------+
+| percona.telemetry | localhost | caching_sha2_password |
+| root              | localhost | mysql_native_password |
++-------------------+-----------+-----------------------+
+
+
+======== 步驟 0-2：主庫 db1 建帳號與測試資料 ========  (2026-11-20 13:47:29)
+[db1] mysql> CREATE USER 'repl'@'192.168.58.%' IDENTIFIED BY 'ChangeMe_Repl_2026'; GRANT REPLICATION SLAVE ON *.* TO 'repl'@'192.168.58.%';
+CREATE USER 'app'@'192.168.58.%' IDENTIFIED BY 'ChangeMe_App_2026'; GRANT SELECT, INSERT, UPDATE, DELETE ON appdb.* TO 'app'@'192.168.58.%';
+CREATE USER 'monitor'@'192.168.58.%' IDENTIFIED WITH caching_sha2_password BY 'ChangeMe_Mon_2026'; GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'monitor'@'192.168.58.%';
+
+[db1] mysql> SELECT user, host, plugin FROM mysql.user WHERE user NOT LIKE 'mysql.%' ORDER BY user;
++-------------------+--------------+-----------------------+
+| user              | host         | plugin                |
++-------------------+--------------+-----------------------+
+| app               | 192.168.58.% | mysql_native_password |
+| monitor           | 192.168.58.% | caching_sha2_password |
+| percona.telemetry | localhost    | caching_sha2_password |
+| repl              | 192.168.58.% | mysql_native_password |
+| root              | localhost    | mysql_native_password |
++-------------------+--------------+-----------------------+
+
+[db1] mysql> CREATE DATABASE appdb;
+CREATE TABLE appdb.t_orders (id BIGINT AUTO_INCREMENT PRIMARY KEY, note VARCHAR(100), src VARCHAR(20), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+SET SESSION cte_max_recursion_depth = 10000;
+INSERT INTO appdb.t_orders (note, src) WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM s WHERE n < 5000) SELECT CONCAT('init-', n), 'seed' FROM s;
+SELECT COUNT(*) FROM appdb.t_orders;
++----------+
+| COUNT(*) |
++----------+
+|     5000 |
++----------+
+
+
+======== 步驟 0-3：db2、db3 接上 db1（GTID 自動定位） ========  (2026-11-20 13:47:30)
+[db2] mysql> RESET MASTER;   -- 清掉初始化改 root 密碼時產生的本機 GTID，避免變成 errant transaction
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='db1', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1; START REPLICA; SET PERSIST super_read_only = ON;
+
+[db3] mysql> RESET MASTER;   -- 清掉初始化改 root 密碼時產生的本機 GTID，避免變成 errant transaction
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='db1', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1; START REPLICA; SET PERSIST super_read_only = ON;
+
+[db1]# sleep 3
+
+[db2] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-10
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-10
+                Auto_Position: 1
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-10
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-10
+                Auto_Position: 1
+
+[db1] mysql> SHOW REPLICAS; SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_clients';
++-----------+------+------+-----------+--------------------------------------+
+| Server_Id | Host | Port | Source_Id | Replica_UUID                         |
++-----------+------+------+-----------+--------------------------------------+
+|         3 | db3  | 3306 |         1 | ea78dfe4-e4e8-11f1-9097-ae75a9ec8c8d |
+|         2 | db2  | 3306 |         1 | e6ef855f-e4e8-11f1-85e2-1e44fd980790 |
++-----------+------+------+-----------+--------------------------------------+
++------------------------------+-------+
+| Variable_name                | Value |
++------------------------------+-------+
+| Rpl_semi_sync_source_clients | 2     |
++------------------------------+-------+
+
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-10', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-10', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.0.46-37 |     5000 | 10622165728472 |
++------+-----------+----------+----------------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.0.46-37 |     5000 | 10622165728472 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.0.46-37 |     5000 | 10622165728472 |
++------+-----------+----------+----------------+
+
+
+======== 步驟 0-4：app 開始持續寫入 db1 ========  (2026-11-20 13:47:36)
+[app]# echo db1 > /tmp/target; rm -f /tmp/writer.stop /tmp/writer.pause /tmp/writer.log; (nohup /root/conf/writer.sh >/dev/null 2>&1 &); sleep 3; tail -3 /tmp/writer.log
+13:47:39.147 OK db1 db1
+13:47:39.399 OK db1 db1
+13:47:39.627 OK db1 db1
+

@@ -1,0 +1,13 @@
+{ "out": "mysql-ha-lab-07", "shots": [
+ { "name": "01-checker-target", "title": "db2 — MySQL Shell 8.4 升級檢查：--target-version 不能寫到小版號", "log": "07-20-upgrade-replicas.log", "from": "--target-version=8.4.11 --config-path", "lines": 9, "hl": ["targetVersion=8.4"] },
+ { "name": "02-checker-errors", "title": "db2 — 升級檢查：2 個 Error", "log": "07-20-upgrade-replicas.log", "from": "1) Removed system variables", "lines": 7, "hl": ["binlog_transaction_dependency_tracking"] },
+ { "name": "03-checker-auth", "title": "db2 — 升級檢查：mysql_native_password 帳號與 default_authentication_plugin", "log": "07-20-upgrade-replicas.log", "from": "5) Check for deprecated or invalid user", "to": "removed and it must be corrected", "skip": ["More information", "https://dev.mysql.com/doc/refman/en/caching"], "hl": ["loose_mysql_native_password=ON", "root@localhost"] },
+ { "name": "04-validate-config", "title": "db2 — 8.0 的設定檔給 8.4：mysqld --validate-config", "log": "07-20-upgrade-replicas.log", "from": "[db2]# mysqld --validate-config --user=mysql; echo", "to": "exit=0", "skip": ["secure-log-path"] },
+ { "name": "05-native-login-fail", "title": "db2 — 沒開 mysql_native_password 就啟動 8.4：root 登不進去", "log": "07-20-upgrade-replicas.log", "from": "[db2]# mysql -e \"SELECT @@version\"; echo", "lines": 3 },
+ { "name": "06-first-start", "title": "db2 — 8.4 第一次啟動自動升級資料字典", "log": "07-20-upgrade-replicas.log", "after": "[db2] 8. 換成 8.4", "from": "[db2]# grep -E \"upgrad|ready", "lines": 5, "hl": ["Server upgrade from '80046' to '80411' completed."] },
+ { "name": "07-removed-syntax", "title": "db2 — 8.4 移除 SHOW SLAVE / MASTER STATUS", "log": "07-20-upgrade-replicas.log", "from": "[db2] mysql> SHOW SLAVE STATUS;", "to": "| mysql-bin" },
+ { "name": "08-new-defaults", "title": "db2 — 同一台 8.0.46 → 8.4.11 預設值改變的變數", "log": "07-20-upgrade-replicas.log", "from": "VARIABLE  8.0.46  8.4.11", "lines": 8 },
+ { "name": "09-switchover-outage", "title": "app — 切換 db1（8.0）→ db2（8.4）的寫入中斷", "log": "07-30-switchover.log", "after": "寫入中斷時間", "from": "ERR db1", "to": "寫入中斷秒數", "hl": ["寫入中斷秒數: 0.698"] },
+ { "name": "10-repl-sha2-fail", "title": "db3 — repl 改成 caching_sha2_password 後重連失敗", "log": "07-40-upgrade-old-primary.log", "after": "步驟 4", "from": "[db3] mysql> SHOW REPLICA STATUS", "to": "Last_IO_Error:", "hl": ["Authentication requires secure connection."] },
+ { "name": "11-final", "title": "最終驗證：app 成功筆數 = 資料庫筆數，三台 CRC 相同", "log": "07-40-upgrade-old-primary.log", "after": "最終驗證", "from": "[app]# touch /tmp/writer.stop", "lines": 34, "hl": ["OK=723", "5723 | 12117748487951"] }
+]}

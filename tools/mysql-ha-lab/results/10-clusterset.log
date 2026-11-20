@@ -1,0 +1,709 @@
+
+======== 步驟 1：六台初始化、dba.configureInstance() ========  (2026-11-20 14:23:49)
+[db4]# mysqld --version; cat /etc/my.cnf.d/server-id.cnf
+/usr/sbin/mysqld  Ver 8.4.11-12 for Linux on x86_64 (Percona Server (GPL), Release 12, Revision 76aa4263)
+[mysqld]
+server_id   = 4
+report_host = db4
+
+[db1] mysqlsh> dba.configureInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026', restart: false})
+Account clusteradmin@192.168.58.% was successfully created.
+The instance 'db1:3306' is valid for InnoDB Cluster usage.
+[db2] mysqlsh> dba.configureInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026', restart: false})
+Account clusteradmin@192.168.58.% was successfully created.
+The instance 'db2:3306' is valid for InnoDB Cluster usage.
+[db3] mysqlsh> dba.configureInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026', restart: false})
+Account clusteradmin@192.168.58.% was successfully created.
+The instance 'db3:3306' is valid for InnoDB Cluster usage.
+[db4] mysqlsh> dba.configureInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026', restart: false})
+Account clusteradmin@192.168.58.% was successfully created.
+The instance 'db4:3306' is valid for InnoDB Cluster usage.
+[db5] mysqlsh> dba.configureInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026', restart: false})
+Account clusteradmin@192.168.58.% was successfully created.
+The instance 'db5:3306' is valid for InnoDB Cluster usage.
+[db6] mysqlsh> dba.configureInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026', restart: false})
+Account clusteradmin@192.168.58.% was successfully created.
+The instance 'db6:3306' is valid for InnoDB Cluster usage.
+
+======== 步驟 2：site A 建立 clusterA（db1 + db2、db3） ========  (2026-11-20 14:24:23)
+[db1] mysql> CREATE USER 'app'@'192.168.58.%' IDENTIFIED BY 'ChangeMe_App_2026'; GRANT SELECT, INSERT, UPDATE, DELETE ON appdb.* TO 'app'@'192.168.58.%';
+CREATE DATABASE appdb;
+CREATE TABLE appdb.t_orders (id BIGINT AUTO_INCREMENT PRIMARY KEY, note VARCHAR(100), src VARCHAR(20), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+SET SESSION cte_max_recursion_depth = 10000;
+INSERT INTO appdb.t_orders (note, src) WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM s WHERE n < 5000) SELECT CONCAT('init-', n), 'seed' FROM s;
+
+[db1] mysqlsh> var c = dba.createCluster('clusterA')
+A new InnoDB Cluster will be created on instance 'db1:3306'.
+Validating instance configuration at db1:3306...
+This instance reports its own address as [1mdb1:3306[0m
+Instance configuration is suitable.
+[36mNOTE: [0mGroup Replication will communicate with other members using 'db1:3306'. Use the localAddress option to override.
+* Checking connectivity and SSL configuration...
+Creating InnoDB Cluster 'clusterA' on 'db1:3306'...
+Adding Seed Instance...
+Cluster successfully created. Use Cluster.addInstance() to add MySQL instances.
+At least 3 instances are needed for the cluster to be able to withstand up to
+one server failure.
+[db1] mysqlsh> dba.getCluster().addInstance('db2:3306', {recoveryMethod: 'clone'})
+* Clone process has finished: 78.15 MB transferred in about 1 second (~78.15 MB/s)
+The instance 'db2:3306' was successfully added to the cluster.
+[db1] mysqlsh> dba.getCluster().addInstance('db3:3306', {recoveryMethod: 'clone'})
+* Clone process has finished: 77.31 MB transferred in about 1 second (~77.31 MB/s)
+The instance 'db3:3306' was successfully added to the cluster.
+
+======== 步驟 3：建立 ClusterSet，site B 建立副本叢集 clusterB（db4 + db5、db6） ========  (2026-11-20 14:24:54)
+[db1] mysqlsh> dba.getCluster().createClusterSet('cs_lab')
+A new ClusterSet will be created based on the Cluster 'clusterA'.
+
+* Validating Cluster 'clusterA' for ClusterSet compliance.
+
+* Creating InnoDB ClusterSet 'cs_lab' on 'clusterA'...
+
+* Updating metadata...
+
+ClusterSet successfully created. Use ClusterSet.createReplicaCluster() to add Replica Clusters to it.
+
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); cs.createReplicaCluster('db4:3306', 'clusterB', {recoveryMethod: 'clone'})
+Setting up replica 'clusterB' of cluster 'clusterA' at instance 'db4:3306'.
+A new InnoDB Cluster will be created on instance 'db4:3306'.
+Validating instance configuration at db4:3306...
+This instance reports its own address as [1mdb4:3306[0m
+Instance configuration is suitable.
+[36mNOTE: [0mGroup Replication will communicate with other members using 'db4:3306'. Use the localAddress option to override.
+* Checking connectivity and SSL configuration...
+* Checking transaction state of the instance...
+[33mWARNING: [0mA GTID set check of the MySQL instance at 'db4:3306' determined that it contains transactions that do not originate from the clusterset, which must be discarded before it can join the clusterset.
+Instance 'db4:3306' has the following errant GTIDs that do not exist in the clusterset:
+ 09b7046f-e4ee-11f1-bfd0-2e413d560d9f:1
+[33mWARNING: [0mDiscarding these extra GTID events can either be done manually or by completely overwriting the state of 'db4:3306' with a physical snapshot from an existing clusterset member. To use this method by default, set the 'recoveryMethod' option to 'clone'.
+Having extra GTID events is not expected, and it is recommended to investigate this further and ensure that the data can be removed prior to choosing the clone recovery method.
+Clone based recovery selected through the recoveryMethod option
+* Checking connectivity and SSL configuration to PRIMARY Cluster...
+Monitoring Clone based state recovery of the new member. Press ^C to abort the operation.
+[1mClone based state recovery is now in progress.[0m
+[36mNOTE: [0mA server restart is expected to happen as part of the clone process. If the
+server does not support the RESTART command or does not come back after a
+while, you may need to manually start it back.
+* Waiting for clone to finish...
+[36mNOTE: [0mdb4:3306 is being cloned from db1:3306
+* Clone process has finished: 77.22 MB transferred in about 1 second (~77.22 MB/s)
+Creating InnoDB Cluster 'clusterB' on 'db4:3306'...
+Adding Seed Instance...
+Cluster successfully created. Use Cluster.addInstance() to add MySQL instances.
+At least 3 instances are needed for the cluster to be able to withstand up to
+one server failure.
+Cluster "memberAuthType" is set to 'PASSWORD' (inherited from the ClusterSet).
+* Configuring ClusterSet managed replication channel...
+** Changing replication source of db4:3306 to db1:3306
+* Waiting for instance 'db4:3306' to synchronize with PRIMARY Cluster...
+* Updating topology
+* Waiting for the Cluster to synchronize with the PRIMARY Cluster...
+Replica Cluster 'clusterB' successfully created on ClusterSet 'cs_lab'.
+[db4] mysqlsh> dba.getCluster().addInstance('db5:3306', {recoveryMethod: 'clone'})
+* Clone process has finished: 77.38 MB transferred in about 1 second (~77.38 MB/s)
+The instance 'db5:3306' was successfully added to the cluster.
+[db4] mysqlsh> dba.getCluster().addInstance('db6:3306', {recoveryMethod: 'clone'})
+* Clone process has finished: 77.31 MB transferred in about 1 second (~77.31 MB/s)
+The instance 'db6:3306' was successfully added to the cluster.
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.status())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "PRIMARY", 
+            "globalStatus": "OK", 
+            "primary": "db1:3306"
+        }, 
+        "clusterB": {
+            "clusterRole": "REPLICA", 
+            "clusterSetReplicationStatus": "OK", 
+            "globalStatus": "OK"
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": "db1:3306", 
+    "primaryCluster": "clusterA", 
+    "status": "HEALTHY", 
+    "statusText": "All Clusters available."
+}
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.describe())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "PRIMARY", 
+            "topology": [
+                {
+                    "address": "db1:3306", 
+                    "label": "db1:3306", 
+                    "role": "HA"
+                }, 
+                {
+                    "address": "db2:3306", 
+                    "label": "db2:3306", 
+                    "role": "HA"
+                }, 
+                {
+                    "address": "db3:3306", 
+                    "label": "db3:3306", 
+                    "role": "HA"
+                }
+            ]
+        }, 
+        "clusterB": {
+            "clusterRole": "REPLICA", 
+            "topology": [
+                {
+                    "address": "db4:3306", 
+                    "label": "db4:3306", 
+                    "role": "HA"
+                }, 
+                {
+                    "address": "db5:3306", 
+                    "label": "db5:3306", 
+                    "role": "HA"
+                }, 
+                {
+                    "address": "db6:3306", 
+                    "label": "db6:3306", 
+                    "role": "HA"
+                }
+            ]
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "primaryCluster": "clusterA"
+}
+
+[db4]# mysql --table -e "SELECT CHANNEL_NAME, HOST, PORT, SOURCE_CONNECTION_AUTO_FAILOVER FROM performance_schema.replication_connection_configuration WHERE CHANNEL_NAME LIKE \"clusterset%\"; SELECT MEMBER_HOST, MEMBER_ROLE, MEMBER_STATE FROM performance_schema.replication_group_members;"
++------------------------+------+------+---------------------------------+
+| CHANNEL_NAME           | HOST | PORT | SOURCE_CONNECTION_AUTO_FAILOVER |
++------------------------+------+------+---------------------------------+
+| clusterset_replication | db1  | 3306 | 1                               |
++------------------------+------+------+---------------------------------+
++-------------+-------------+--------------+
+| MEMBER_HOST | MEMBER_ROLE | MEMBER_STATE |
++-------------+-------------+--------------+
+| db4         | PRIMARY     | ONLINE       |
+| db5         | SECONDARY   | ONLINE       |
+| db6         | SECONDARY   | ONLINE       |
++-------------+-------------+--------------+
+
+
+======== 步驟 4：Router bootstrap 到 ClusterSet，app 寫入 6446 ========  (2026-11-20 14:25:36)
+[router]# mysqlrouter --bootstrap 'clusteradmin:ChangeMe_Admin_2026@db1:3306' --user=mysqlrouter 2>&1 | grep -E 'Bootstrapping|configured for|Read/Write Conn|Read/Only Conn'
+# Bootstrapping system MySQL Router 8.4.11 (Percona Server (GPL), Release 12, Revision 76aa4263) instance...
+# MySQL Router configured for the ClusterSet 'cs_lab'
+- Read/Write Connections: localhost:6446
+- Read/Only Connections:  localhost:6447
+- Read/Write Connections: localhost:6448
+- Read/Only Connections:  localhost:6449
+
+[router]# systemctl enable --now mysqlrouter >/dev/null 2>&1; sleep 2; systemctl is-active mysqlrouter
+active
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.listRouters())
+{
+    "domainName": "cs_lab", 
+    "routers": {
+        "router::system": {
+            "hostname": "router", 
+            "lastCheckIn": "2026-11-20 14:25:37", 
+            "roPort": "6447", 
+            "roXPort": "6449", 
+            "rwPort": "6446", 
+            "rwSplitPort": "6450", 
+            "rwXPort": "6448", 
+            "targetCluster": null, 
+            "version": "8.4.11"
+        }
+    }
+}
+
+[app]# echo router:6446 > /tmp/target; rm -f /tmp/writer.stop /tmp/writer.pause /tmp/writer.log; (nohup /root/conf/writer.sh >/dev/null 2>&1 &); sleep 3; tail -3 /tmp/writer.log
+14:25:42.209 OK router:6446 db1
+14:25:42.442 OK router:6446 db1
+14:25:42.679 OK router:6446 db1
+
+
+======== 步驟 5：計畫內切換 cs.setPrimaryCluster('clusterB')（例如機房 A 要停機維護） ========  (2026-11-20 14:25:42)
+[db1] mysqlsh> var cs = dba.getClusterSet(); cs.setPrimaryCluster('clusterB')
+Switching the primary cluster of the clusterset to 'clusterB'
+* Verifying clusterset status
+** Checking cluster clusterA
+  Cluster 'clusterA' is available
+** Checking cluster clusterB
+  Cluster 'clusterB' is available
+** Waiting for the promoted cluster to apply pending received transactions...
+* Refreshing replication account of demoted cluster
+* Synchronizing transaction backlog at db4:3306
+* Updating metadata
+* Updating topology
+** Changing replication source of db2:3306 to db4:3306
+** Changing replication source of db3:3306 to db4:3306
+** Changing replication source of db1:3306 to db4:3306
+* Acquiring locks in ClusterSet instances
+** Pre-synchronizing SECONDARIES
+** Acquiring global lock at PRIMARY
+** Acquiring global lock at SECONDARIES
+* Synchronizing remaining transactions at promoted primary
+* Updating replica clusters
+Cluster 'clusterB' was promoted to PRIMARY of the clusterset. The PRIMARY instance is 'db4:3306'
+[app]# sleep 3; tail -2 /tmp/writer.log
+14:25:47.143 ERR router:6446 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+14:25:47.384 OK router:6446 db4
+
+[app]# python3 /root/conf/outage.py '14:25:42.000' /tmp/writer.log 
+ERR 筆數: 14
+   14 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+最後一筆成功（舊）: 14:25:43.876 db1
+第一筆成功（新）  : 14:25:47.384 db4
+寫入中斷秒數（兩筆成功寫入的最大間隔）: 3.508
+
+[db4] mysqlsh> var cs = dba.getClusterSet(); print(cs.status())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "REPLICA", 
+            "clusterSetReplicationStatus": "OK", 
+            "globalStatus": "OK"
+        }, 
+        "clusterB": {
+            "clusterRole": "PRIMARY", 
+            "globalStatus": "OK", 
+            "primary": "db4:3306"
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": "db4:3306", 
+    "primaryCluster": "clusterB", 
+    "status": "HEALTHY", 
+    "statusText": "All Clusters available."
+}
+
+
+======== 步驟 6：災難：site B（現在的主叢集）整個機房斷線 ========  (2026-11-20 14:25:48)
+[db4]# systemctl kill -s KILL mysqld; systemctl stop mysqld; systemctl is-active mysqld
+failed
+
+[db5]# systemctl kill -s KILL mysqld; systemctl stop mysqld; systemctl is-active mysqld
+failed
+
+[db6]# systemctl kill -s KILL mysqld; systemctl stop mysqld; systemctl is-active mysqld
+failed
+
+[app]# sleep 5; tail -3 /tmp/writer.log
+14:25:48.095 OK router:6446 db4
+14:25:48.344 OK router:6446 db4
+14:25:48.583 OK router:6446 db4
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.status())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "REPLICA", 
+            "clusterSetReplicationStatus": "CONNECTING", 
+            "globalStatus": "OK"
+        }, 
+        "clusterB": {
+            "clusterErrors": [
+                "ERROR: Could not connect to any ONLINE members but there are unreachable instances that could still be ONLINE."
+            ], 
+            "clusterRole": "PRIMARY", 
+            "clusterSetReplicationStatus": "UNKNOWN", 
+            "globalStatus": "UNKNOWN", 
+            "primary": null, 
+            "status": "UNREACHABLE", 
+            "statusText": "Could not connect to any ONLINE members"
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": null, 
+    "primaryCluster": "clusterB", 
+    "status": "UNAVAILABLE", 
+    "statusText": "Primary Cluster is not reachable from the Shell, assuming it to be unavailable."
+}
+
+
+======== 步驟 7：在 site A 強制把 clusterA 升為主叢集 cs.forcePrimaryCluster('clusterA') ========  (2026-11-20 14:25:54)
+[db1] mysqlsh> var cs = dba.getClusterSet(); cs.forcePrimaryCluster('clusterA')
+Failing-over primary cluster of the clusterset to 'clusterA'
+* Verifying primary cluster status
+None of the instances of the PRIMARY cluster 'clusterB' could be reached.
+* Verifying clusterset status
+** Checking cluster clusterA
+  Cluster 'clusterA' is available
+** Waiting for instances to apply pending received transactions...
+** Checking whether target cluster has the most recent GTID set
+* Promoting cluster 'clusterA'
+* Updating metadata
+PRIMARY cluster failed-over to 'clusterA'. The PRIMARY instance is 'db1:3306'
+Former PRIMARY cluster 'clusterB' was INVALIDATED, transactions that were not yet replicated may be lost.
+In case of network partitions and similar, the former PRIMARY Cluster 'clusterB' may still be online and a split-brain can happen. To avoid it, use <Cluster>.fenceAllTraffic() to fence the Cluster from all application traffic, or <Cluster>.fenceWrites() to fence it from write traffic only.
+[app]# sleep 12; tail -2 /tmp/writer.log
+14:26:12.448 OK router:6446 db1
+14:26:12.682 OK router:6446 db1
+
+[app]# python3 /root/conf/outage.py '14:25:48.000' /tmp/writer.log 14:26:12.000
+ERR 筆數: 26
+   25 ERROR 2003 (HY000): Can't connect to MySQL server on 'router:6446' (111)
+    1 ERROR 2013 (HY000): Lost connection to MySQL server at 'reading authorization packet', system error: 71
+最後一筆成功（舊）: 14:25:48.583 db4
+第一筆成功（新）  : 14:26:04.467 db1
+寫入中斷秒數（兩筆成功寫入的最大間隔）: 15.884
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.status())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "PRIMARY", 
+            "globalStatus": "OK", 
+            "primary": "db1:3306"
+        }, 
+        "clusterB": {
+            "clusterErrors": [
+                "ERROR: Could not connect to any ONLINE members but there are unreachable instances that could still be ONLINE.", 
+                "WARNING: Cluster was invalidated and must be either removed from the ClusterSet or rejoined"
+            ], 
+            "clusterRole": "REPLICA", 
+            "clusterSetReplicationStatus": "UNKNOWN", 
+            "globalStatus": "INVALIDATED", 
+            "status": "UNREACHABLE", 
+            "statusText": "Could not connect to any ONLINE members"
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": "db1:3306", 
+    "primaryCluster": "clusterA", 
+    "status": "AVAILABLE", 
+    "statusText": "Primary Cluster available, there are issues with a Replica cluster."
+}
+
+
+======== 步驟 8：site B 恢復：叢集要從完全停機重新啟動，再加回 ClusterSet ========  (2026-11-20 14:26:13)
+[db4]# systemctl start mysqld; systemctl is-active mysqld
+active
+
+[db5]# systemctl start mysqld; systemctl is-active mysqld
+active
+
+[db6]# systemctl start mysqld; systemctl is-active mysqld
+active
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.status())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "PRIMARY", 
+            "globalStatus": "OK", 
+            "primary": "db1:3306"
+        }, 
+        "clusterB": {
+            "clusterErrors": [
+                "ERROR: Cluster members are reachable but they're all OFFLINE.", 
+                "WARNING: Replication channel from the Primary Cluster is missing", 
+                "WARNING: Cluster was invalidated and must be either removed from the ClusterSet or rejoined"
+            ], 
+            "clusterRole": "REPLICA", 
+            "clusterSetReplication": {}, 
+            "clusterSetReplicationStatus": "MISSING", 
+            "globalStatus": "INVALIDATED", 
+            "status": "OFFLINE", 
+            "statusText": "All members of the group are OFFLINE"
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": "db1:3306", 
+    "primaryCluster": "clusterA", 
+    "status": "AVAILABLE", 
+    "statusText": "Primary Cluster available, there are issues with a Replica cluster."
+}
+
+[db4] mysqlsh> dba.rebootClusterFromCompleteOutage('clusterB')
+No PRIMARY member found for cluster 'clusterB'
+[33mWARNING: [0mCluster 'clusterB' was INVALIDATED and must be removed from the ClusterSet.
+Restoring the Cluster 'clusterB' from complete outage...
+Cluster instances: 'db4:3306' (OFFLINE), 'db5:3306' (OFFLINE), 'db6:3306' (OFFLINE)
+Waiting for instances to apply pending received transactions...
+[36mNOTE: [0mThe instance 'db4:3306' is running auto-rejoin process, which will be cancelled.
+[36mNOTE: [0mCancelling active GR auto-initialization at db4:3306
+Validating instance configuration at db4:3306...
+This instance reports its own address as [1mdb4:3306[0m
+Instance configuration is suitable.
+* Waiting for seed instance to become ONLINE...
+db4:3306 was restored.
+Skipping rejoining remaining instances because the Cluster belongs to a ClusterSet and is INVALIDATED. Please add or remove the instances after the Cluster is rejoined to the ClusterSet.
+The Cluster was successfully rebooted.
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.status())
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "PRIMARY", 
+            "globalStatus": "OK", 
+            "primary": "db1:3306"
+        }, 
+        "clusterB": {
+            "clusterErrors": [
+                "WARNING: Replication channel from the Primary Cluster is missing", 
+                "WARNING: Cluster was invalidated and must be either removed from the ClusterSet or rejoined"
+            ], 
+            "clusterRole": "REPLICA", 
+            "clusterSetReplication": {}, 
+            "clusterSetReplicationStatus": "MISSING", 
+            "globalStatus": "INVALIDATED", 
+            "status": "INVALIDATED", 
+            "statusText": "Cluster was invalidated by the ClusterSet it belongs to. 2 members are not active."
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": "db1:3306", 
+    "primaryCluster": "clusterA", 
+    "status": "AVAILABLE", 
+    "statusText": "Primary Cluster available, there are issues with a Replica cluster."
+}
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); cs.rejoinCluster('clusterB')
+Rejoining cluster 'clusterB' to the clusterset
+[36mNOTE: [0mCluster 'clusterB' is invalidated
+* Updating metadata
+* Rejoining cluster
+** Changing replication source of db4:3306 to db1:3306
+Cluster 'clusterB' was rejoined to the clusterset
+[db4] mysqlsh> dba.getCluster().rejoinInstance('db5:3306')
+The safest and most convenient way to provision a new instance is through automatic clone provisioning, which will completely overwrite the state of 'db5:3306' with a physical snapshot from an existing cluster member. To use this method by default, set the 'recoveryMethod' option to 'clone'.
+The incremental state recovery may be safely used if you are sure all updates ever executed in the cluster were done with GTIDs enabled, there are no purged transactions and the new instance contains the same GTID set as the cluster or a subset of it. To use this method by default, set the 'recoveryMethod' option to 'incremental'.
+Incremental state recovery was selected because it seems to be safely usable.
+Validating instance configuration at db5:3306...
+This instance reports its own address as [1mdb5:3306[0m
+Instance configuration is suitable.
+Rejoining instance 'db5:3306' to cluster 'clusterB'...
+* Waiting for the Cluster to synchronize with the PRIMARY Cluster...
+* Configuring ClusterSet managed replication channel...
+** Changing replication source of db5:3306 to db1:3306
+Re-creating recovery account...
+[36mNOTE: [0mUser 'mysql_innodb_cluster_5'@'%' already existed at instance 'db1:3306'. It will be deleted and created again with a new password.
+* Waiting for the Cluster to synchronize with the PRIMARY Cluster...
+Monitoring recovery process of the new cluster member. Press ^C to stop monitoring and let it continue in background.
+[1mState recovery already finished for 'db5:3306'[0m
+The instance 'db5:3306' was successfully rejoined to the cluster.
+[db4] mysqlsh> dba.getCluster().rejoinInstance('db6:3306')
+The safest and most convenient way to provision a new instance is through automatic clone provisioning, which will completely overwrite the state of 'db6:3306' with a physical snapshot from an existing cluster member. To use this method by default, set the 'recoveryMethod' option to 'clone'.
+The incremental state recovery may be safely used if you are sure all updates ever executed in the cluster were done with GTIDs enabled, there are no purged transactions and the new instance contains the same GTID set as the cluster or a subset of it. To use this method by default, set the 'recoveryMethod' option to 'incremental'.
+Incremental state recovery was selected because it seems to be safely usable.
+Validating instance configuration at db6:3306...
+This instance reports its own address as [1mdb6:3306[0m
+Instance configuration is suitable.
+Rejoining instance 'db6:3306' to cluster 'clusterB'...
+* Waiting for the Cluster to synchronize with the PRIMARY Cluster...
+* Configuring ClusterSet managed replication channel...
+** Changing replication source of db6:3306 to db1:3306
+Re-creating recovery account...
+[36mNOTE: [0mUser 'mysql_innodb_cluster_6'@'%' already existed at instance 'db1:3306'. It will be deleted and created again with a new password.
+* Waiting for the Cluster to synchronize with the PRIMARY Cluster...
+Monitoring recovery process of the new cluster member. Press ^C to stop monitoring and let it continue in background.
+[1mState recovery already finished for 'db6:3306'[0m
+The instance 'db6:3306' was successfully rejoined to the cluster.
+[db4]# sleep 5
+
+[db1] mysqlsh> var cs = dba.getClusterSet(); print(cs.status({extended: 1}))
+{
+    "clusters": {
+        "clusterA": {
+            "clusterRole": "PRIMARY", 
+            "globalStatus": "OK", 
+            "primary": "db1:3306", 
+            "status": "OK", 
+            "statusText": "Cluster is ONLINE and can tolerate up to ONE failure.", 
+            "topology": {
+                "db1:3306": {
+                    "address": "db1:3306", 
+                    "memberRole": "PRIMARY", 
+                    "mode": "R/W", 
+                    "readReplicas": {}, 
+                    "role": "HA", 
+                    "status": "ONLINE", 
+                    "version": "8.4.11"
+                }, 
+                "db2:3306": {
+                    "address": "db2:3306", 
+                    "memberRole": "SECONDARY", 
+                    "mode": "R/O", 
+                    "readReplicas": {}, 
+                    "replicationLagFromImmediateSource": "", 
+                    "replicationLagFromOriginalSource": "", 
+                    "role": "HA", 
+                    "status": "ONLINE", 
+                    "version": "8.4.11"
+                }, 
+                "db3:3306": {
+                    "address": "db3:3306", 
+                    "memberRole": "SECONDARY", 
+                    "mode": "R/O", 
+                    "readReplicas": {}, 
+                    "replicationLagFromImmediateSource": "", 
+                    "replicationLagFromOriginalSource": "", 
+                    "role": "HA", 
+                    "status": "ONLINE", 
+                    "version": "8.4.11"
+                }
+            }, 
+            "transactionSet": "013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-557,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6"
+        }, 
+        "clusterB": {
+            "clusterRole": "REPLICA", 
+            "clusterSetReplication": {
+                "applierStatus": "APPLIED_ALL", 
+                "applierThreadState": "Waiting for an event from Coordinator", 
+                "applierWorkerThreads": 4, 
+                "receiver": "db4:3306", 
+                "receiverStatus": "ON", 
+                "receiverThreadState": "Waiting for source to send event", 
+                "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                "replicationSslMode": "REQUIRED", 
+                "source": "db1:3306"
+            }, 
+            "clusterSetReplicationStatus": "OK", 
+            "globalStatus": "OK", 
+            "status": "OK", 
+            "statusText": "Cluster is ONLINE and can tolerate up to ONE failure.", 
+            "topology": {
+                "db4:3306": {
+                    "address": "db4:3306", 
+                    "memberRole": "PRIMARY", 
+                    "mode": "R/O", 
+                    "readReplicas": {}, 
+                    "replicationLagFromImmediateSource": "", 
+                    "replicationLagFromOriginalSource": "", 
+                    "role": "HA", 
+                    "status": "ONLINE", 
+                    "version": "8.4.11"
+                }, 
+                "db5:3306": {
+                    "address": "db5:3306", 
+                    "memberRole": "SECONDARY", 
+                    "mode": "R/O", 
+                    "readReplicas": {}, 
+                    "replicationLagFromImmediateSource": "", 
+                    "replicationLagFromOriginalSource": "", 
+                    "role": "HA", 
+                    "status": "ONLINE", 
+                    "version": "8.4.11"
+                }, 
+                "db6:3306": {
+                    "address": "db6:3306", 
+                    "memberRole": "SECONDARY", 
+                    "mode": "R/O", 
+                    "readReplicas": {}, 
+                    "replicationLagFromImmediateSource": "", 
+                    "replicationLagFromOriginalSource": "", 
+                    "role": "HA", 
+                    "status": "ONLINE", 
+                    "version": "8.4.11"
+                }
+            }, 
+            "transactionSet": "013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-557,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6", 
+            "transactionSetConsistencyStatus": "OK", 
+            "transactionSetErrantGtidSet": "", 
+            "transactionSetMissingGtidSet": ""
+        }
+    }, 
+    "domainName": "cs_lab", 
+    "globalPrimaryInstance": "db1:3306", 
+    "metadataServer": "db1:3306", 
+    "primaryCluster": "clusterA", 
+    "status": "HEALTHY", 
+    "statusText": "All Clusters available."
+}
+
+
+======== 最終驗證 ========  (2026-11-20 14:27:33)
+[app]# touch /tmp/writer.stop; sleep 1; echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; grep " OK " /tmp/writer.log | awk "{print \$4}" | sort | uniq -c
+OK=401 ERR=40
+    395 db1
+      6 db4
+
+[db1] mysql> SELECT src, COUNT(*) FROM appdb.t_orders WHERE note LIKE 'w-%' GROUP BY src;
++------+----------+
+| src  | COUNT(*) |
++------+----------+
+| db1  |      395 |
+| db4  |        6 |
++------+----------+
+
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-558,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-558,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db4] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-558,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db5] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-558,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db6] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('013f0d41-e4ee-11f1-9260-1e593015c064:1-10,15eeb4e7-e4ee-11f1-846c-1e593015c064:1-558,28fa3569-e4ee-11f1-9353-2e413d560d9f:1-6', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.4.11-12 |     5401 | 11534603573934 |
++------+-----------+----------+----------------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.4.11-12 |     5401 | 11534603573934 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.4.11-12 |     5401 | 11534603573934 |
++------+-----------+----------+----------------+
+
+[db4] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db4  | 8.4.11-12 |     5401 | 11534603573934 |
++------+-----------+----------+----------------+
+
+[db5] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db5  | 8.4.11-12 |     5401 | 11534603573934 |
++------+-----------+----------+----------------+
+
+[db6] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db6  | 8.4.11-12 |     5401 | 11534603573934 |
++------+-----------+----------+----------------+
+

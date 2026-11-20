@@ -1,0 +1,829 @@
+
+======== 步驟 1：三台初始化（設定檔：00-server.cnf + replication.cnf） ========  (2026-11-20 14:15:01)
+[db1]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf;  cp /root/conf/00-server.cnf /etc/my.cnf.d/00-server.cnf && cp /root/conf/lab09/replication.cnf /etc/my.cnf.d/replication.cnf && printf '[mysqld]\nserver_id   = 1\nreport_host = db1\n' > /etc/my.cnf.d/server-id.cnf && ls /etc/my.cnf.d
+00-server.cnf
+replication.cnf
+server-id.cnf
+
+[db1]# systemctl enable --now mysqld && systemctl is-active mysqld
+Created symlink /etc/systemd/system/mysql.service → /usr/lib/systemd/system/mysqld.service.
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqld.service → /usr/lib/systemd/system/mysqld.service.
+active
+
+[db1]# TMP=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}'); mysql --connect-expired-password -uroot -p"$TMP" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'ChangeMe_Root_2026';" 2>&1 | grep -v Warning; printf '[client]\nuser=root\npassword="ChangeMe_Root_2026"\n' > /root/.my.cnf; chmod 600 /root/.my.cnf; echo root password set
+root password set
+
+[db2]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf;  cp /root/conf/00-server.cnf /etc/my.cnf.d/00-server.cnf && cp /root/conf/lab09/replication.cnf /etc/my.cnf.d/replication.cnf && printf '[mysqld]\nserver_id   = 2\nreport_host = db2\n' > /etc/my.cnf.d/server-id.cnf && ls /etc/my.cnf.d
+00-server.cnf
+replication.cnf
+server-id.cnf
+
+[db2]# systemctl enable --now mysqld && systemctl is-active mysqld
+Created symlink /etc/systemd/system/mysql.service → /usr/lib/systemd/system/mysqld.service.
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqld.service → /usr/lib/systemd/system/mysqld.service.
+active
+
+[db2]# TMP=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}'); mysql --connect-expired-password -uroot -p"$TMP" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'ChangeMe_Root_2026';" 2>&1 | grep -v Warning; printf '[client]\nuser=root\npassword="ChangeMe_Root_2026"\n' > /root/.my.cnf; chmod 600 /root/.my.cnf; echo root password set
+root password set
+
+[db3]# grep -q '^!includedir /etc/my.cnf.d' /etc/my.cnf || echo '!includedir /etc/my.cnf.d' >> /etc/my.cnf;  cp /root/conf/00-server.cnf /etc/my.cnf.d/00-server.cnf && cp /root/conf/lab09/replication.cnf /etc/my.cnf.d/replication.cnf && printf '[mysqld]\nserver_id   = 3\nreport_host = db3\n' > /etc/my.cnf.d/server-id.cnf && ls /etc/my.cnf.d
+00-server.cnf
+replication.cnf
+server-id.cnf
+
+[db3]# systemctl enable --now mysqld && systemctl is-active mysqld
+Created symlink /etc/systemd/system/mysql.service → /usr/lib/systemd/system/mysqld.service.
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqld.service → /usr/lib/systemd/system/mysqld.service.
+active
+
+[db3]# TMP=$(grep 'temporary password' /var/log/mysqld.log | tail -1 | awk '{print $NF}'); mysql --connect-expired-password -uroot -p"$TMP" -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'ChangeMe_Root_2026';" 2>&1 | grep -v Warning; printf '[client]\nuser=root\npassword="ChangeMe_Root_2026"\n' > /root/.my.cnf; chmod 600 /root/.my.cnf; echo root password set
+root password set
+
+
+======== 步驟 2：dba.configureReplicaSetInstance()：檢查設定並建立叢集管理帳號 ========  (2026-11-20 14:15:15)
+[db1] mysqlsh> dba.configureReplicaSetInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026'})
+Configuring local MySQL instance listening at port 3306 for use in an InnoDB ReplicaSet...
+
+This instance reports its own address as [1mdb1:3306[0m
+
+applierWorkerThreads will be set to the default value of 4.
+
+Creating user clusteradmin@192.168.58.%.
+Account clusteradmin@192.168.58.% was successfully created.
+
+
+The instance 'db1:3306' is valid for InnoDB ReplicaSet usage.
+
+Successfully enabled parallel appliers.
+
+[db2] mysqlsh> dba.configureReplicaSetInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026'})
+Configuring local MySQL instance listening at port 3306 for use in an InnoDB ReplicaSet...
+
+This instance reports its own address as [1mdb2:3306[0m
+
+applierWorkerThreads will be set to the default value of 4.
+
+Creating user clusteradmin@192.168.58.%.
+Account clusteradmin@192.168.58.% was successfully created.
+
+
+The instance 'db2:3306' is valid for InnoDB ReplicaSet usage.
+
+Successfully enabled parallel appliers.
+
+[db3] mysqlsh> dba.configureReplicaSetInstance(null, {clusterAdmin: "'clusteradmin'@'192.168.58.%'", clusterAdminPassword: 'ChangeMe_Admin_2026'})
+Configuring local MySQL instance listening at port 3306 for use in an InnoDB ReplicaSet...
+
+This instance reports its own address as [1mdb3:3306[0m
+
+applierWorkerThreads will be set to the default value of 4.
+
+Creating user clusteradmin@192.168.58.%.
+Account clusteradmin@192.168.58.% was successfully created.
+
+
+The instance 'db3:3306' is valid for InnoDB ReplicaSet usage.
+
+Successfully enabled parallel appliers.
+
+[db1] mysql> SELECT @@replica_parallel_workers;   -- 設定檔寫 8
++----------------------------+
+| @@replica_parallel_workers |
++----------------------------+
+|                          4 |
++----------------------------+
+
+[db1]# python3 -m json.tool /var/lib/mysql/mysqld-auto.cnf | grep -B1 -A3 replica_parallel_workers
+        },
+        "replica_parallel_workers": {
+            "Value": "4",
+            "Metadata": {
+                "Host": "localhost",
+
+
+======== 步驟 3：在 db1 建立 ReplicaSet，加入 db2、db3（Clone 複製資料） ========  (2026-11-20 14:15:18)
+[db1] mysql> CREATE USER 'app'@'192.168.58.%' IDENTIFIED BY 'ChangeMe_App_2026'; GRANT SELECT, INSERT, UPDATE, DELETE ON appdb.* TO 'app'@'192.168.58.%';
+CREATE DATABASE appdb;
+CREATE TABLE appdb.t_orders (id BIGINT AUTO_INCREMENT PRIMARY KEY, note VARCHAR(100), src VARCHAR(20), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+SET SESSION cte_max_recursion_depth = 10000;
+INSERT INTO appdb.t_orders (note, src) WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM s WHERE n < 5000) SELECT CONCAT('init-', n), 'seed' FROM s;
+
+[db1] mysqlsh> var rs = dba.createReplicaSet('rs_lab')
+A new replicaset with instance 'db1:3306' will be created.
+
+* Checking MySQL instance at db1:3306
+
+This instance reports its own address as [1mdb1:3306[0m
+db1:3306: Instance configuration is suitable.
+
+* Checking connectivity and SSL configuration...
+* Updating metadata...
+
+ReplicaSet object successfully created for db1:3306.
+Use rs.addInstance() to add more asynchronously replicated instances to this replicaset and rs.status() to check its status.
+
+
+[db1] mysqlsh> var rs = dba.getReplicaSet(); rs.addInstance('db2:3306', {recoveryMethod: 'clone'})
+You are connected to a member of replicaset 'rs_lab'.
+Adding instance to the replicaset...
+
+* Performing validation checks
+
+This instance reports its own address as [1mdb2:3306[0m
+db2:3306: Instance configuration is suitable.
+
+* Checking async replication topology...
+
+* Checking connectivity and SSL configuration...
+
+* Checking transaction state of the instance...
+
+[33mWARNING: [0mA GTID set check of the MySQL instance at 'db2:3306' determined that it contains transactions that do not originate from the replicaset, which must be discarded before it can join the replicaset.
+
+Instance 'db2:3306' has the following errant GTIDs that do not exist in the replicaset:
+ c92f144c-e4ec-11f1-9a47-fa43a94fa852:1
+
+[33mWARNING: [0mDiscarding these extra GTID events can either be done manually or by completely overwriting the state of 'db2:3306' with a physical snapshot from an existing replicaset member. To use this method by default, set the 'recoveryMethod' option to 'clone'.
+
+Having extra GTID events is not expected, and it is recommended to investigate this further and ensure that the data can be removed prior to choosing the clone recovery method.
+Clone based recovery selected through the recoveryMethod option
+
+* Updating topology
+Monitoring Clone based state recovery of the new member. Press ^C to abort the operation.
+[1mClone based state recovery is now in progress.[0m
+
+[36mNOTE: [0mA server restart is expected to happen as part of the clone process. If the
+server does not support the RESTART command or does not come back after a
+while, you may need to manually start it back.
+
+* Waiting for clone to finish...
+[36mNOTE: [0mdb2:3306 is being cloned from db1:3306
+** Stage DROP DATA: Completed
+** Stage FILE COPY: Completed
+** Stage PAGE COPY: Completed
+** Stage REDO COPY: Completed
+** Stage FILE SYNC: Completed
+** Stage RESTART: Completed
+* Clone process has finished: 78.13 MB transferred in about 1 second (~78.13 MB/s)
+
+** Changing replication source of db2:3306 to db1:3306
+** Waiting for new instance to synchronize with PRIMARY...
+
+
+The instance 'db2:3306' was added to the replicaset and is replicating from db1:3306.
+
+* Waiting for instance 'db2:3306' to synchronize the Metadata updates with the PRIMARY...
+
+
+
+[db1] mysqlsh> var rs = dba.getReplicaSet(); rs.addInstance('db3:3306', {recoveryMethod: 'clone'})
+You are connected to a member of replicaset 'rs_lab'.
+Adding instance to the replicaset...
+
+* Performing validation checks
+
+This instance reports its own address as [1mdb3:3306[0m
+db3:3306: Instance configuration is suitable.
+
+* Checking async replication topology...
+
+* Checking connectivity and SSL configuration...
+
+* Checking transaction state of the instance...
+
+[33mWARNING: [0mA GTID set check of the MySQL instance at 'db3:3306' determined that it contains transactions that do not originate from the replicaset, which must be discarded before it can join the replicaset.
+
+Instance 'db3:3306' has the following errant GTIDs that do not exist in the replicaset:
+ cbe857cc-e4ec-11f1-bf6e-224dfce61d5b:1
+
+[33mWARNING: [0mDiscarding these extra GTID events can either be done manually or by completely overwriting the state of 'db3:3306' with a physical snapshot from an existing replicaset member. To use this method by default, set the 'recoveryMethod' option to 'clone'.
+
+Having extra GTID events is not expected, and it is recommended to investigate this further and ensure that the data can be removed prior to choosing the clone recovery method.
+Clone based recovery selected through the recoveryMethod option
+
+* Updating topology
+* Waiting for the donor to synchronize with PRIMARY...
+
+
+
+Monitoring Clone based state recovery of the new member. Press ^C to abort the operation.
+[1mClone based state recovery is now in progress.[0m
+
+[36mNOTE: [0mA server restart is expected to happen as part of the clone process. If the
+server does not support the RESTART command or does not come back after a
+while, you may need to manually start it back.
+
+* Waiting for clone to finish...
+[36mNOTE: [0mdb3:3306 is being cloned from db2:3306
+** Stage DROP DATA: Completed
+** Stage FILE COPY: Completed
+** Stage PAGE COPY: Completed
+** Stage REDO COPY: Completed
+** Stage FILE SYNC: Completed
+** Stage RESTART: Completed
+* Clone process has finished: 77.27 MB transferred in about 1 second (~77.27 MB/s)
+
+** Changing replication source of db3:3306 to db1:3306
+** Waiting for new instance to synchronize with PRIMARY...
+
+
+The instance 'db3:3306' was added to the replicaset and is replicating from db1:3306.
+
+* Waiting for instance 'db3:3306' to synchronize the Metadata updates with the PRIMARY...
+
+
+
+[db1] mysqlsh> print(dba.getReplicaSet().status())
+You are connected to a member of replicaset 'rs_lab'.
+{
+    "replicaSet": {
+        "name": "rs_lab", 
+        "primary": "db1:3306", 
+        "status": "AVAILABLE", 
+        "statusText": "All instances available.", 
+        "topology": {
+            "db1:3306": {
+                "address": "db1:3306", 
+                "instanceRole": "PRIMARY", 
+                "mode": "R/W", 
+                "status": "ONLINE"
+            }, 
+            "db2:3306": {
+                "address": "db2:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }, 
+            "db3:3306": {
+                "address": "db3:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }
+        }, 
+        "type": "ASYNC"
+    }
+}
+
+[db2] mysql> SELECT @@hostname, @@super_read_only, @@read_only;
++------------+-------------------+-------------+
+| @@hostname | @@super_read_only | @@read_only |
++------------+-------------------+-------------+
+| db2        |                 1 |           1 |
++------------+-------------------+-------------+
+
+[db2] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: c669a65c-e4ec-11f1-8d2f-165b33869862:78-86
+            Executed_Gtid_Set: c669a65c-e4ec-11f1-8d2f-165b33869862:1-86
+                Auto_Position: 1
+
+
+======== 步驟 4：MySQL Router bootstrap ========  (2026-11-20 14:15:35)
+[router]# mysqlrouter --bootstrap 'clusteradmin:ChangeMe_Admin_2026@db1:3306' --user=mysqlrouter 2>&1 | grep -v -E '^$|Using a password'
+# Bootstrapping system MySQL Router 8.4.11 (Percona Server (GPL), Release 12, Revision 76aa4263) instance...
+- Creating account(s) (only those that are needed, if any)
+- Verifying account (using it to run SQL queries that would be run by Router)
+- Storing account in keyring
+- Adjusting permissions of generated files
+- Creating configuration /etc/mysqlrouter/mysqlrouter.conf
+Existing configuration backed up to '/etc/mysqlrouter/mysqlrouter.conf.bak'
+# MySQL Router configured for the InnoDB ReplicaSet 'rs_lab'
+After this MySQL Router has been started with the generated configuration
+    $ /etc/init.d/mysqlrouter restart
+or
+    $ systemctl start mysqlrouter
+or
+    $ mysqlrouter -c /etc/mysqlrouter/mysqlrouter.conf
+InnoDB ReplicaSet 'rs_lab' can be reached by connecting to:
+## MySQL Classic protocol
+- Read/Write Connections: localhost:6446
+- Read/Only Connections:  localhost:6447
+- Read/Write Split Connections: localhost:6450
+## MySQL X protocol
+- Read/Write Connections: localhost:6448
+- Read/Only Connections:  localhost:6449
+
+[router]# systemctl enable --now mysqlrouter; sleep 2; systemctl is-active mysqlrouter
+Created symlink /etc/systemd/system/multi-user.target.wants/mysqlrouter.service → /usr/lib/systemd/system/mysqlrouter.service.
+active
+
+[app]# for p in 6446 6447 6447; do mysql -hrouter -P$p -uapp -pChangeMe_App_2026 -N -e 'SELECT @@hostname, @@super_read_only' 2>/dev/null | sed "s/^/port $p → /"; done
+port 6446 → db1	0
+port 6447 → db2	1
+port 6447 → db3	1
+
+[db1] mysqlsh> print(dba.getReplicaSet().listRouters())
+You are connected to a member of replicaset 'rs_lab'.
+{
+    "replicaSetName": "rs_lab", 
+    "routers": {
+        "router::system": {
+            "hostname": "router", 
+            "lastCheckIn": "2026-11-20 14:15:35", 
+            "roPort": "6447", 
+            "roXPort": "6449", 
+            "rwPort": "6446", 
+            "rwSplitPort": "6450", 
+            "rwXPort": "6448", 
+            "version": "8.4.11"
+        }
+    }
+}
+
+
+======== 步驟 5：app 透過 Router 的讀寫埠 6446 持續寫入 ========  (2026-11-20 14:15:38)
+[app]# echo router:6446 > /tmp/target; rm -f /tmp/writer.stop /tmp/writer.pause /tmp/writer.log; (nohup /root/conf/writer.sh >/dev/null 2>&1 &); sleep 3; tail -3 /tmp/writer.log
+14:15:40.964 OK router:6446 db1
+14:15:41.200 OK router:6446 db1
+14:15:41.434 OK router:6446 db1
+
+
+======== 步驟 6：計畫內切換 rs.setPrimaryInstance('db2') ========  (2026-11-20 14:15:41)
+[db1] mysqlsh> dba.getReplicaSet().setPrimaryInstance('db2:3306')
+You are connected to a member of replicaset 'rs_lab'.
+db2:3306 will be promoted to PRIMARY of 'rs_lab'.
+The current PRIMARY is db1:3306.
+
+* Connecting to replicaset instances
+** Connecting to db1:3306
+** Connecting to db2:3306
+** Connecting to db3:3306
+** Connecting to db1:3306
+** Connecting to db2:3306
+** Connecting to db3:3306
+
+* Performing validation checks
+** Checking async replication topology...
+** Checking transaction state of the instance...
+
+* Synchronizing transaction backlog at db2:3306
+
+
+* Updating metadata
+
+* Acquiring locks in ReplicaSet instances
+** Pre-synchronizing SECONDARIES
+** Acquiring global lock at PRIMARY
+** Acquiring global lock at SECONDARIES
+
+* Updating replication topology
+** Changing replication source of db1:3306 to db2:3306
+** Changing replication source of db3:3306 to db2:3306
+
+db2:3306 was promoted to PRIMARY.
+
+
+[app]# sleep 3; tail -2 /tmp/writer.log
+14:15:45.192 OK router:6446 db2
+14:15:45.424 OK router:6446 db2
+
+[app]# python3 /root/conf/outage.py '14:15:41.000' /tmp/writer.log
+ERR 筆數: 0
+最後一筆成功（舊）: 14:15:42.129 db1
+第一筆成功（新）  : 14:15:42.382 db2
+寫入中斷秒數（兩筆成功寫入的最大間隔）: 0.253
+
+[db2] mysqlsh> print(dba.getReplicaSet().status())
+You are connected to a member of replicaset 'rs_lab'.
+{
+    "replicaSet": {
+        "name": "rs_lab", 
+        "primary": "db2:3306", 
+        "status": "AVAILABLE", 
+        "statusText": "All instances available.", 
+        "topology": {
+            "db1:3306": {
+                "address": "db1:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }, 
+            "db2:3306": {
+                "address": "db2:3306", 
+                "instanceRole": "PRIMARY", 
+                "mode": "R/W", 
+                "status": "ONLINE"
+            }, 
+            "db3:3306": {
+                "address": "db3:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }
+        }, 
+        "type": "ASYNC"
+    }
+}
+
+
+======== 步驟 7：主庫 db2 故障（kill -9 mysqld 並停止服務），ReplicaSet 不會自動 failover ========  (2026-11-20 14:15:46)
+[db2]# systemctl kill -s KILL mysqld; systemctl stop mysqld; systemctl is-active mysqld
+failed
+
+[app]# sleep 5; tail -3 /tmp/writer.log
+14:15:51.129 ERR router:6446 ERROR 2003 (HY000): Can't connect to MySQL server on 'router:6446' (111)
+14:15:51.346 ERR router:6446 ERROR 2003 (HY000): Can't connect to MySQL server on 'router:6446' (111)
+14:15:51.563 ERR router:6446 ERROR 2003 (HY000): Can't connect to MySQL server on 'router:6446' (111)
+
+[db1] mysqlsh> print(dba.getReplicaSet().status())
+You are connected to a member of replicaset 'rs_lab'.
+[33mWARNING: [0mUnable to connect to the PRIMARY of the ReplicaSet 'rs_lab': MYSQLSH 51118: Could not open connection to 'db2:3306': Can't connect to MySQL server on 'db2:3306' (111)
+ReplicaSet change operations will not be possible unless the PRIMARY can be reached.
+If the PRIMARY is unavailable, you must either repair it or perform a failover.
+See \help forcePrimaryInstance for more information.
+{
+    "replicaSet": {
+        "name": "rs_lab", 
+        "primary": "db2:3306", 
+        "status": "UNAVAILABLE", 
+        "statusText": "PRIMARY instance is not available, but there is at least one SECONDARY that could be force-promoted.", 
+        "topology": {
+            "db1:3306": {
+                "address": "db1:3306", 
+                "fenced": true, 
+                "instanceErrors": [
+                    "NOTE: Replication I/O thread is reconnecting."
+                ], 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "expectedSource": "db2:3306", 
+                    "receiverLastError": "Error reconnecting to source 'mysql_innodb_rs_1@db2:3306'. This was attempt 1/10, with a delay of 60 seconds between attempts. Message: Can't connect to MySQL server on 'db2:3306' (111)", 
+                    "receiverLastErrorNumber": 2003, 
+                    "receiverLastErrorTimestamp": "2026-11-20 14:15:46.588250", 
+                    "receiverStatus": "ERROR", 
+                    "receiverThreadState": "", 
+                    "replicationLag": null, 
+                    "replicationSsl": null, 
+                    "replicationSslMode": "REQUIRED", 
+                    "source": "db2:3306"
+                }, 
+                "status": "CONNECTING", 
+                "transactionSetConsistencyStatus": null
+            }, 
+            "db2:3306": {
+                "address": "db2:3306", 
+                "connectError": "Could not open connection to 'db2:3306': Can't connect to MySQL server on 'db2:3306' (111)", 
+                "fenced": null, 
+                "instanceRole": "PRIMARY", 
+                "mode": null, 
+                "status": "UNREACHABLE"
+            }, 
+            "db3:3306": {
+                "address": "db3:3306", 
+                "fenced": true, 
+                "instanceErrors": [
+                    "NOTE: Replication I/O thread is reconnecting."
+                ], 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "expectedSource": "db2:3306", 
+                    "receiverLastError": "Error reconnecting to source 'mysql_innodb_rs_3@db2:3306'. This was attempt 1/10, with a delay of 60 seconds between attempts. Message: Can't connect to MySQL server on 'db2:3306' (111)", 
+                    "receiverLastErrorNumber": 2003, 
+                    "receiverLastErrorTimestamp": "2026-11-20 14:15:46.588189", 
+                    "receiverStatus": "ERROR", 
+                    "receiverThreadState": "", 
+                    "replicationLag": null, 
+                    "replicationSsl": null, 
+                    "replicationSslMode": "REQUIRED", 
+                    "source": "db2:3306"
+                }, 
+                "status": "CONNECTING", 
+                "transactionSetConsistencyStatus": null
+            }
+        }, 
+        "type": "ASYNC"
+    }
+}
+
+
+======== 步驟 8：手動 failover：rs.forcePrimaryInstance('db1') ========  (2026-11-20 14:15:52)
+[db1] mysqlsh> dba.getReplicaSet().forcePrimaryInstance('db1:3306')
+You are connected to a member of replicaset 'rs_lab'.
+* Connecting to replicaset instances
+** Connecting to db1:3306
+** Connecting to db3:3306
+
+* Waiting for all received transactions to be applied
+db1:3306 will be promoted to PRIMARY of the replicaset and the former PRIMARY will be invalidated.
+
+* Checking status of last known PRIMARY
+[36mNOTE: [0mdb2:3306 is UNREACHABLE
+* Checking status of promoted instance
+[36mNOTE: [0mdb1:3306 has status CONNECTING
+* Checking transaction set status
+* Promoting db1:3306 to a PRIMARY...
+
+* Updating metadata...
+
+db1:3306 was force-promoted to PRIMARY.
+[36mNOTE: [0mFormer PRIMARY db2:3306 is now invalidated and must be removed from the replicaset.
+* Updating source of remaining SECONDARY instances
+** Changing replication source of db3:3306 to db1:3306
+
+Failover finished successfully.
+
+
+[app]# sleep 3; tail -2 /tmp/writer.log
+14:15:55.657 OK router:6446 db1
+14:15:55.889 OK router:6446 db1
+
+[app]# python3 /root/conf/outage.py '14:15:46.000' /tmp/writer.log
+ERR 筆數: 30
+   28 ERROR 2003 (HY000): Can't connect to MySQL server on 'router:6446' (111)
+    1 ERROR 2013 (HY000): Lost connection to MySQL server at 'reading authorization packet', system error: 71
+    1 ERROR 2003 (HY000): Can't connect to remote MySQL server
+最後一筆成功（舊）: 14:15:46.360 db2
+第一筆成功（新）  : 14:15:53.089 db1
+寫入中斷秒數（兩筆成功寫入的最大間隔）: 6.729
+
+[db1] mysqlsh> print(dba.getReplicaSet().status())
+You are connected to a member of replicaset 'rs_lab'.
+{
+    "replicaSet": {
+        "name": "rs_lab", 
+        "primary": "db1:3306", 
+        "status": "AVAILABLE_PARTIAL", 
+        "statusText": "The PRIMARY instance is available, but one or more SECONDARY instances are not.", 
+        "topology": {
+            "db1:3306": {
+                "address": "db1:3306", 
+                "instanceRole": "PRIMARY", 
+                "mode": "R/W", 
+                "status": "ONLINE"
+            }, 
+            "db2:3306": {
+                "address": "db2:3306", 
+                "connectError": "Could not open connection to 'db2:3306': Can't connect to MySQL server on 'db2:3306' (111)", 
+                "fenced": null, 
+                "instanceRole": null, 
+                "mode": null, 
+                "status": "INVALIDATED"
+            }, 
+            "db3:3306": {
+                "address": "db3:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }
+        }, 
+        "type": "ASYNC"
+    }
+}
+
+
+======== 步驟 9：db2 修好後重新啟動：被標記為 INVALIDATED，Router 不會把流量送給它 ========  (2026-11-20 14:15:56)
+[db2]# systemctl start mysqld; systemctl is-active mysqld
+active
+
+[db2] mysql> SELECT @@hostname, @@read_only, @@super_read_only;
++------------+-------------+-------------------+
+| @@hostname | @@read_only | @@super_read_only |
++------------+-------------+-------------------+
+| db2        |           0 |                 0 |
++------------+-------------+-------------------+
+
+[db1] mysqlsh> print(dba.getReplicaSet().status())
+You are connected to a member of replicaset 'rs_lab'.
+{
+    "replicaSet": {
+        "name": "rs_lab", 
+        "primary": "db1:3306", 
+        "status": "AVAILABLE_PARTIAL", 
+        "statusText": "The PRIMARY instance is available, but one or more SECONDARY instances are not.", 
+        "topology": {
+            "db1:3306": {
+                "address": "db1:3306", 
+                "instanceRole": "PRIMARY", 
+                "mode": "R/W", 
+                "status": "ONLINE"
+            }, 
+            "db2:3306": {
+                "address": "db2:3306", 
+                "fenced": false, 
+                "instanceErrors": [
+                    "WARNING: Instance was INVALIDATED and must be rejoined or removed from the replicaset.", 
+                    "ERROR: Instance is NOT a PRIMARY but super_read_only option is OFF. Accidental updates to this instance are possible and will cause inconsistencies in the replicaset."
+                ], 
+                "instanceRole": null, 
+                "mode": null, 
+                "status": "INVALIDATED", 
+                "transactionSetConsistencyStatus": "OK"
+            }, 
+            "db3:3306": {
+                "address": "db3:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }
+        }, 
+        "type": "ASYNC"
+    }
+}
+
+
+======== 步驟 10：rs.rejoinInstance('db2') ========  (2026-11-20 14:15:59)
+[db1] mysqlsh> dba.getReplicaSet().rejoinInstance('db2:3306')
+You are connected to a member of replicaset 'rs_lab'.
+* Validating instance...
+
+This instance reports its own address as [1mdb2:3306[0m
+db2:3306: Instance configuration is suitable.
+** Checking transaction state of the instance...
+The safest and most convenient way to provision a new instance is through automatic clone provisioning, which will completely overwrite the state of 'db2:3306' with a physical snapshot from an existing replicaset member. To use this method by default, set the 'recoveryMethod' option to 'clone'.
+
+[33mWARNING: [0mIt should be safe to rely on replication to incrementally recover the state of the new instance if you are sure all updates ever executed in the replicaset were done with GTIDs enabled, there are no purged transactions and the new instance contains the same GTID set as the replicaset or a subset of it. To use this method by default, set the 'recoveryMethod' option to 'incremental'.
+
+Incremental state recovery was selected because it seems to be safely usable.
+
+* Rejoining instance to replicaset...
+** Changing replication source of db2:3306 to db1:3306
+** Checking replication channel status...
+** Waiting for rejoined instance to synchronize with PRIMARY...
+
+
+* Updating the Metadata...
+The instance 'db2:3306' rejoined the replicaset and is replicating from 'db1:3306'.
+
+
+[db1] mysqlsh> print(dba.getReplicaSet().status())
+You are connected to a member of replicaset 'rs_lab'.
+{
+    "replicaSet": {
+        "name": "rs_lab", 
+        "primary": "db1:3306", 
+        "status": "AVAILABLE", 
+        "statusText": "All instances available.", 
+        "topology": {
+            "db1:3306": {
+                "address": "db1:3306", 
+                "instanceRole": "PRIMARY", 
+                "mode": "R/W", 
+                "status": "ONLINE"
+            }, 
+            "db2:3306": {
+                "address": "db2:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }, 
+            "db3:3306": {
+                "address": "db3:3306", 
+                "instanceRole": "SECONDARY", 
+                "mode": "R/O", 
+                "replication": {
+                    "applierStatus": "APPLIED_ALL", 
+                    "applierThreadState": "Waiting for an event from Coordinator", 
+                    "applierWorkerThreads": 4, 
+                    "receiverStatus": "ON", 
+                    "receiverThreadState": "Waiting for source to send event", 
+                    "replicationLag": "applier_queue_applied", 
+                    "replicationSsl": "TLS_AES_128_GCM_SHA256 TLSv1.3", 
+                    "replicationSslMode": "REQUIRED"
+                }, 
+                "status": "ONLINE"
+            }
+        }, 
+        "type": "ASYNC"
+    }
+}
+
+
+======== 最終驗證：async 複製下 failover 有沒有遺失已回報成功的寫入 ========  (2026-11-20 14:16:00)
+[app]# touch /tmp/writer.stop; sleep 1; echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; grep " OK " /tmp/writer.log | awk "{print \$4}" | sort | uniq -c
+OK=67 ERR=30
+     49 db1
+     18 db2
+
+[db1] mysql> SELECT src, COUNT(*) FROM appdb.t_orders WHERE note LIKE 'w-%' GROUP BY src;
++------+----------+
+| src  | COUNT(*) |
++------+----------+
+| db1  |       49 |
+| db2  |       18 |
++------+----------+
+
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('c669a65c-e4ec-11f1-8d2f-165b33869862:1-154,c92f144c-e4ec-11f1-9a47-fa43a94fa852:1-19', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('c669a65c-e4ec-11f1-8d2f-165b33869862:1-154,c92f144c-e4ec-11f1-9a47-fa43a94fa852:1-19', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.4.11-12 |     5067 | 10773709853441 |
++------+-----------+----------+----------------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.4.11-12 |     5067 | 10773709853441 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.4.11-12 |     5067 | 10773709853441 |
++------+-----------+----------+----------------+
+

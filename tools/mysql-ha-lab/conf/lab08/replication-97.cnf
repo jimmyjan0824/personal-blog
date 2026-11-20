@@ -1,0 +1,21 @@
+# /etc/my.cnf.d/replication.cnf（升級到 9.7 LTS 後：mysql_native_password 外掛在 9.0 已整個移除，這一行必須拿掉）
+[mysqld]
+bind_address             = 0.0.0.0
+log_bin                  = mysql-bin
+binlog_format            = ROW
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+log_replica_updates      = ON
+binlog_expire_logs_seconds = 604800
+sync_binlog              = 1
+relay_log                = relay-bin
+relay_log_recovery       = ON
+replica_parallel_workers = 8
+replica_preserve_commit_order = ON
+
+plugin_load_add = semisync_source.so
+plugin_load_add = semisync_replica.so
+loose_rpl_semi_sync_source_enabled = ON
+loose_rpl_semi_sync_source_timeout = 1000
+loose_rpl_semi_sync_replica_enabled = ON
+

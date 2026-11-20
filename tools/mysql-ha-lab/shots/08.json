@@ -1,0 +1,12 @@
+{ "out": "mysql-ha-lab-08", "shots": [
+ { "name": "01-repo-versions", "title": "db1 — Percona 套件庫：8.4 LTS、9.7 LTS、8.x Innovation", "log": "08-20-upgrade-97.log", "from": "[db1]# for r in ps-84-lts", "lines": 13 },
+ { "name": "02-percona-release-trap", "title": "db2 — percona-release setup ps-97-lts 什麼都沒啟用", "log": "08-20-upgrade-97.log", "from": "[db2]# rpm -q percona-release", "to": "@ps-84-lts-release", "hl": ["percona-release-1.0-34.noarch", "percona-ps-84-lts-release.repo.bak"] },
+ { "name": "03-percona-release-enable", "title": "db2 — 改用 percona-release enable ps-97-lts release", "log": "08-20-upgrade-97.log", "from": "[db2]# percona-release disable ps-84-lts", "to": "9.7.2-3.1.el9", "hl": ["percona-ps-97-lts-release.repo"] },
+ { "name": "04-checker-summary", "title": "db2 — MySQL Shell 9.7.1 升級檢查：0 錯誤，沒有檢查帳號的認證外掛", "log": "08-20-upgrade-97.log", "from": "Warning: The following system variables that were detected as being used are", "to": "upgrading.", "hl": ["Errors:   0", "consider using 'log_slave_updates' instead."] },
+ { "name": "05-validate-native", "title": "db2 — 9.7 不認得 mysql_native_password = ON", "log": "08-20-upgrade-97.log", "from": "[db2]# mysqld --validate-config --user=mysql; echo", "lines": 6, "skip": ["secure-log-path"], "hl": ["unknown variable 'mysql_native_password=ON'"] },
+ { "name": "06-first-start", "title": "db2 — 9.7 第一次啟動：資料字典 80300 → 90200", "log": "08-20-upgrade-97.log", "after": "[db2] 啟動 9.7", "from": "[db2]# time systemctl start", "lines": 12, "hl": ["Server upgrade from '80411' to '90702' completed."] },
+ { "name": "07-legacy-login", "title": "app — mysql_native_password 帳號在 9.7 登不進去；在 8.4 主庫換外掛後恢復", "log": "08-20-upgrade-97.log", "after": "[db2] mysql> SELECT PLUGIN_NAME", "from": "[db2] mysql> SELECT PLUGIN_NAME", "to": "5235", "skip": ["========"] },
+ { "name": "08-client-commands", "title": "db2 — 9.x 的 mysql 用戶端：非互動模式預設不處理 \\G", "log": "08-20-upgrade-97.log", "from": "[db2]# mysql --version; mysql -e", "lines": 12 },
+ { "name": "09-new-defaults", "title": "db2 — 同一台 8.4.11 → 9.7.2 預設值改變的變數", "log": "08-20-upgrade-97.log", "from": "VARIABLE  8.4.11  9.7.2", "lines": 12, "skip": ["build_id", "performance_schema_"] },
+ { "name": "10-final", "title": "最終驗證：三台 9.7.2，app 成功筆數 = 資料庫筆數", "log": "08-20-upgrade-97.log", "after": "最終驗證", "from": "[app]# touch /tmp/writer.stop", "lines": 60, "skip": ["WAIT_FOR_EXECUTED", "| waited", "|      0 |"], "hl": ["OK=658", "5658 | 12096140050026"] }
+]}
