@@ -1,0 +1,21 @@
+# /etc/my.cnf.d/00-server.cnf
+# 本系列的效能與運維基礎設定（Lab 01 的 00-server.cnf），實驗環境把記憶體相關參數縮小
+[mysqld]
+character_set_server      = utf8mb4
+collation_server          = utf8mb4_0900_ai_ci
+log_timestamps            = SYSTEM
+skip_name_resolve         = ON
+max_connections           = 500
+max_connect_errors        = 100000
+tmp_table_size            = 64M
+max_heap_table_size       = 64M
+innodb_buffer_pool_size   = 256M                # 實體主機依 Lab 01 設 60~70% RAM
+innodb_redo_log_capacity  = 256M                # 實體主機依 Lab 01 設 2G
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method       = O_DIRECT
+innodb_io_capacity        = 2000
+innodb_io_capacity_max    = 4000
+innodb_print_all_deadlocks = ON
+slow_query_log            = ON
+slow_query_log_file       = /var/lib/mysql/slow.log
+long_query_time           = 1

@@ -1,0 +1,31 @@
+# Lab 07~12 共用：db1~db6 跑 MySQL、router 跑 MySQL Router、app 模擬應用程式持續寫入（不啟動 mysqld）
+#   LAB_IMAGE：mysqllab-ps80（Lab 07 起點）或 mysqllab-ps84（預設，Lab 08~12）
+#   每個腳本只啟動自己用到的節點，例如 docker compose up -d db1 db2 db3 app
+x-node: &node
+  image: ${LAB_IMAGE:-mysqllab-ps84}
+  pull_policy: never
+  privileged: true            # systemd 當 PID 1
+  cgroup: host
+  volumes: ["/sys/fs/cgroup:/sys/fs/cgroup:rw", "./conf:/root/conf:ro"]
+  tmpfs: ["/run", "/run/lock"]
+  extra_hosts:
+    - "db1:192.168.58.11"
+    - "db2:192.168.58.12"
+    - "db3:192.168.58.13"
+    - "db4:192.168.58.14"
+    - "db5:192.168.58.15"
+    - "db6:192.168.58.16"
+    - "router:192.168.58.20"
+    - "app:192.168.58.30"
+services:
+  db1:    { <<: *node, hostname: db1,    networks: { labnet: { ipv4_address: 192.168.58.11 } } }
+  db2:    { <<: *node, hostname: db2,    networks: { labnet: { ipv4_address: 192.168.58.12 } } }
+  db3:    { <<: *node, hostname: db3,    networks: { labnet: { ipv4_address: 192.168.58.13 } } }
+  db4:    { <<: *node, hostname: db4,    networks: { labnet: { ipv4_address: 192.168.58.14 } } }
+  db5:    { <<: *node, hostname: db5,    networks: { labnet: { ipv4_address: 192.168.58.15 } } }
+  db6:    { <<: *node, hostname: db6,    networks: { labnet: { ipv4_address: 192.168.58.16 } } }
+  router: { <<: *node, hostname: router, networks: { labnet: { ipv4_address: 192.168.58.20 } } }
+  app:    { <<: *node, hostname: app,    networks: { labnet: { ipv4_address: 192.168.58.30 } } }
+networks:
+  labnet:
+    ipam: { config: [ { subnet: 192.168.58.0/24 } ] }

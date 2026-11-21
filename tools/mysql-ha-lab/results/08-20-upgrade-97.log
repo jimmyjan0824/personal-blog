@@ -1,0 +1,644 @@
+
+======== 版本號：LTS 與 Innovation、日曆版號 ========  (2026-11-20 14:02:57)
+[db1]# for r in ps-84-lts ps-97-lts ps-8x-innovation; do echo "== $r"; dnf -q --disablerepo="*" --repofrompath=t,https://repo.percona.com/$r/yum/release/9/RPMS/x86_64/ --showduplicates list percona-server-server 2>/dev/null | awk "NR>1{print \$2}" | tail -3; done
+== ps-84-lts
+8.4.10-10.1.el9
+8.4.11-11.1.el9
+8.4.11-12.1.el9
+== ps-97-lts
+9.7.1-1.1.el9
+9.7.2-2.1.el9
+9.7.2-3.1.el9
+== ps-8x-innovation
+8.1.0-1.1.el9
+8.2.0-1.1.el9
+8.3.0-1.1.el9
+
+[db1] mysql> SELECT @@version, @@version_comment;
++-----------+-----------------------------------------------------+
+| @@version | @@version_comment                                   |
++-----------+-----------------------------------------------------+
+| 8.4.11-12 | Percona Server (GPL), Release 12, Revision 76aa4263 |
++-----------+-----------------------------------------------------+
+
+[app]# echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; tail -1 /tmp/writer.log
+OK=34 ERR=0
+14:03:01.781 OK db1 db1
+
+
+======== [db2] 切換到 ps-97-lts 套件庫 ========  (2026-11-20 14:03:01)
+
+======== [db2] 坑：percona-release 1.0-34 的 setup 不認得 ps-97-lts（停用全部套件庫後什麼都沒啟用） ========  (2026-11-20 14:03:01)
+[db2]# rpm -q percona-release; percona-release setup -y ps-97-lts 2>&1 | tail -2; ls /etc/yum.repos.d/ | grep percona; dnf -q --showduplicates list percona-server-server 2>&1 | tail -2
+percona-release-1.0-34.noarch
+* Disabling all Percona Repositories
+<*> All done!
+percona-prel-release.repo
+percona-ps-84-lts-release.repo.bak
+percona-pxb-84-lts-release.repo.bak
+percona-telemetry-release.repo
+Installed Packages
+percona-server-server.x86_64      8.4.11-12.1.el9      @ps-84-lts-release-x86_64
+
+[db2]# percona-release disable ps-84-lts release >/dev/null 2>&1; percona-release enable ps-97-lts release 2>&1 | tail -2; ls /etc/yum.repos.d/ | grep percona; dnf -q --showduplicates list percona-server-server percona-mysql-shell 2>&1 | grep -v "^Installed\|^Available" | tail -6
+* Enabling the Percona Server for MySQL - PS 9.7- repository
+<*> All done!
+percona-prel-release.repo
+percona-ps-84-lts-release.repo.bak
+percona-ps-97-lts-release.repo
+percona-pxb-84-lts-release.repo.bak
+percona-telemetry-release.repo
+percona-server-server.x86_64      8.4.11-12.1.el9      @ps-84-lts-release-x86_64
+percona-mysql-shell.x86_64        9.7.1-1.el9          ps-97-lts-release-x86_64 
+percona-mysql-shell.x86_64        9.7.1-2.el9          ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.1-1.1.el9        ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.2-2.1.el9        ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.2-3.1.el9        ps-97-lts-release-x86_64 
+
+
+======== [db2] 升級檢查（MySQL Shell 9.7） ========  (2026-11-20 14:03:12)
+[db2]# dnf upgrade -y percona-mysql-shell 2>&1 | grep -E "^ percona|Complete|Error"; mysqlsh --version
+ percona-mysql-shell   x86_64   9.7.1-2.el9    ps-97-lts-release-x86_64   115 M
+Complete!
+mysqlsh   Ver 9.7.1 for Linux on x86_64 - for MySQL 9.7.1-1 (Source distribution)
+
+[db2]# mysqlsh --no-wizard -uroot --password='ChangeMe_Root_2026' --socket=/var/lib/mysql/mysql.sock -- util check-for-server-upgrade --target-version=9.7 --config-path=/etc/my.cnf 2>&1 | grep -v 'Using a password'
+The MySQL server at /var%2Flib%2Fmysql%2Fmysql.sock, version 8.4.11-12 -
+Percona Server (GPL), Release 12, Revision 76aa4263, will now be checked for
+compatibility issues for upgrade to MySQL 9.7.1.
+
+1) System variable check for deprecation, removal, changes in defaults values
+or invalid values. (sysVars)
+   Following system variables that were detected as being used ware changed,
+   deprecated or removed. Please update  your system accordingly before the
+   upgrade.
+
+   Warning: The following system variables that are not defined in your
+   configuration file will have  new default values. Please review if you rely
+   on their current values and if so, explicitly  define them before performing
+   upgrade.
+   - authentication_ldap_sasl_auth_method_name: default value changed from
+   SCRAM-SHA-1 to SCRAM-SHA-256..
+   - back_log: default value changed from -1 to 10000..
+   - binlog_transaction_dependency_history_size: default value changed from
+   25000 to 10000000..
+   - caching_sha2_password_digest_rounds: default value changed from 5000 to
+   10000..
+   - explain_format: default value changed from TRADITIONAL to TREE..
+   - explain_json_format_version: default value changed from 1 to 2..
+   - group_replication_recovery_use_ssl: default value changed from OFF to ON..
+   - group_replication_ssl_mode: default value changed from DISABLED to
+   REQUIRED..
+   - innodb_change_buffer_max_size: default value changed from 25 to 5..
+   - innodb_change_buffering: default value changed from none to all..
+   - innodb_log_writer_threads: default value changed from ON to If binary
+   logging is enabled and available logical processors > 32: ON; if binary
+   logging is not enabled and available logical processors > 4: ON; in all
+   other cases: OFF..
+   - telemetry.metrics_enabled: default value changed from ON to OFF..
+   - telemetry.otel_exporter_otlp_metrics_endpoint: default value changed from
+   http://localhost:4318/v1/metrics to empty..
+   - telemetry.otel_exporter_otlp_traces_endpoint: default value changed from
+   http://localhost:4318/v1/traces to ..
+   - telemetry.trace_enabled: default value changed from ON to OFF..
+   - thread_pool_algorithm: default value changed from 0 to 1..
+   - thread_pool_max_transactions_limit: default value changed from 0 to MIN(
+   32 * (thread_pool_size), 512)..
+   - thread_pool_max_unused_threads: default value changed from 0 to 2..
+   - thread_pool_query_threads_per_group: default value changed from 1 to 2..
+
+   Warning: The following system variables that were detected as being used are
+   deprecated.  Consider updating your system to not rely on them before the
+   upgrade.
+   - binlog_format: variable deprecated at version 8.0.34 is set to ROW
+   (GLOBAL)..
+   - log_slave_updates: variable deprecated at version 8.0.26 is set to ON
+   (GLOBAL)., consider using 'log_slave_updates' instead.
+   - slave_parallel_workers: variable deprecated at version 8.0.26 is set to 8
+   (GLOBAL)., consider using 'replica_parallel_workers' instead.
+   - slave_preserve_commit_order: variable deprecated at version 8.0.26 is set
+   to ON (GLOBAL)., consider using 'replica_preserve_commit_order' instead.
+
+
+
+2) Issues reported by 'check table x for upgrade' command (checkTableCommand)
+  Check failed: The MySQL server is running with the --super-read-only option so it cannot execute this statement
+Errors:   0
+Warnings: 23
+Notices:  0
+
+[36mNOTE: [0mNo fatal errors were found that would prevent an upgrade, but some potential issues were detected. Please ensure that the reported issues are not significant before upgrading.
+
+
+======== [db2] 停複製、完整關機、備份 ========  (2026-11-20 14:03:30)
+[db2]# mysql -N -e "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables" > /root/vars-84.txt; wc -l < /root/vars-84.txt
+703
+
+[db2] mysql> STOP REPLICA; SET GLOBAL innodb_fast_shutdown = 0;
+
+[db2]# time systemctl stop mysqld; cp -a /var/lib/mysql /var/lib/mysql-8.4-backup && cp -a /etc/my.cnf.d /root/my.cnf.d-8.4 && du -sh /var/lib/mysql-8.4-backup
+
+real	0m1.385s
+user	0m0.006s
+sys	0m0.000s
+346M	/var/lib/mysql-8.4-backup
+
+
+======== [db2] 升級套件 ========  (2026-11-20 14:03:32)
+[db2]# dnf upgrade -y 'percona-server-*' percona-mysql-router percona-icu-data-files percona-mysql-shell 2>&1 | grep -E '^ percona|Complete|Error'; rpm -qa | grep -iE 'percona-(server|mysql|icu|xtrabackup)' | sort; mysqld --version
+ percona-icu-data-files          x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  2.3 M
+ percona-mysql-router            x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  9.8 M
+ percona-server-client           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  3.6 M
+ percona-server-server           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64   71 M
+ percona-server-shared           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  1.5 M
+ percona-server-client-plugins   x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  3.8 M
+Complete!
+percona-icu-data-files-9.7.2-3.1.el9.x86_64
+percona-mysql-router-9.7.2-3.1.el9.x86_64
+percona-mysql-shell-9.7.1-2.el9.x86_64
+percona-server-client-9.7.2-3.1.el9.x86_64
+percona-server-client-plugins-9.7.2-3.1.el9.x86_64
+percona-server-server-9.7.2-3.1.el9.x86_64
+percona-server-shared-9.7.2-3.1.el9.x86_64
+percona-xtrabackup-84-8.4.0-7.1.el9.x86_64
+/usr/sbin/mysqld  Ver 9.7.2-3 for Linux on x86_64 (Percona Server (GPL), Release 3, Revision 45d3d00f)
+
+
+======== [db2] 8.4 的設定直接給 9.7 ========  (2026-11-20 14:03:40)
+[db2]# mysqld --validate-config --user=mysql; echo "exit=$?"
+2026-11-20T14:03:40.519028-00:00 0 [Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
+2026-11-20T14:03:40.519175-00:00 0 [Warning] [MY-010097] [Server] Insecure configuration for --secure-log-path: Current value does not restrict location of generated files. Consider setting it to a valid, non-empty path.
+2026-11-20T14:03:40.524136-00:00 0 [ERROR] [MY-000067] [Server] unknown variable 'mysql_native_password=ON'.
+2026-11-20T14:03:40.524167-00:00 0 [ERROR] [MY-010119] [Server] Aborting
+exit=1
+
+[db2]# cp /root/conf/lab08/replication-97.cnf /etc/my.cnf.d/replication.cnf; mysqld --validate-config --user=mysql; echo "exit=$?"
+2026-11-20T14:03:40.664922-00:00 0 [Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
+2026-11-20T14:03:40.665069-00:00 0 [Warning] [MY-010097] [Server] Insecure configuration for --secure-log-path: Current value does not restrict location of generated files. Consider setting it to a valid, non-empty path.
+exit=0
+
+
+======== [db2] 啟動 9.7 ========  (2026-11-20 14:03:40)
+[db2]# time systemctl start mysqld; systemctl is-active mysqld; grep -E "Data dictionary upgrad|Server upgrade|ready for connections|\[ERROR\]" /var/log/mysqld.log | tail -5
+
+real	0m4.534s
+user	0m0.004s
+sys	0m0.004s
+active
+2026-11-20T14:03:41.760803-00:00 1 [System] [MY-013413] [Server] Data dictionary upgrade from version '80300' to '90200' completed.
+2026-11-20T14:03:42.852808-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80411' to '90702' started.
+2026-11-20T14:03:45.183063-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80411' to '90702' completed.
+2026-11-20T14:03:45.347680-00:00 0 [System] [MY-011323] [Server] X Plugin ready for connections. Bind-address: '0.0.0.0' port: 33060, socket: /var/lib/mysql/mysqlx.sock
+2026-11-20T14:03:45.347707-00:00 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '9.7.2-3'  socket: '/var/lib/mysql/mysql.sock'  port: 3306  Percona Server (GPL), Release 3, Revision 45d3d00f.
+
+[db2] mysql> SELECT @@hostname, @@version, @@version_comment, @@super_read_only\G
+*************************** 1. row ***************************
+       @@hostname: db2
+        @@version: 9.7.2-3
+@@version_comment: Percona Server (GPL), Release 3, Revision 45d3d00f
+@@super_read_only: 1
+
+[db2]# sleep 3
+
+[db2] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 0654f967-e4eb-11f1-bcc4-969437c2ccce:166-237
+            Executed_Gtid_Set: 0654f967-e4eb-11f1-bcc4-969437c2ccce:1-237
+                Auto_Position: 1
+
+[db2] mysql> SELECT user, host, plugin FROM mysql.user WHERE user NOT LIKE 'mysql.%' ORDER BY user;
++-------------------+--------------+-----------------------+
+| user              | host         | plugin                |
++-------------------+--------------+-----------------------+
+| app               | 192.168.58.% | caching_sha2_password |
+| legacy_report     | 192.168.58.% | mysql_native_password |
+| percona.telemetry | localhost    | caching_sha2_password |
+| repl              | 192.168.58.% | caching_sha2_password |
+| root              | localhost    | caching_sha2_password |
++-------------------+--------------+-----------------------+
+
+[db2] mysql> SELECT PLUGIN_NAME, PLUGIN_STATUS FROM information_schema.PLUGINS WHERE PLUGIN_NAME LIKE '%native%' OR PLUGIN_NAME LIKE 'rpl_semi%';
++-----------------------+---------------+
+| PLUGIN_NAME           | PLUGIN_STATUS |
++-----------------------+---------------+
+| rpl_semi_sync_source  | ACTIVE        |
+| rpl_semi_sync_replica | ACTIVE        |
++-----------------------+---------------+
+
+[app]# mysql -hdb2 -ulegacy_report -pChangeMe_Legacy_2026 -e 'SELECT COUNT(*) FROM appdb.t_orders' 2>&1 | grep -v Warning
+ERROR 1524 (HY000): Plugin 'mysql_native_password' is not loaded
+
+
+======== [db2] 解法：在 8.4 主庫把帳號換成 caching_sha2_password（複製到 9.7 從庫） ========  (2026-11-20 14:03:49)
+[db1] mysql> ALTER USER 'legacy_report'@'192.168.58.%' IDENTIFIED WITH caching_sha2_password BY 'ChangeMe_Legacy_2026';
+
+[app]# sleep 1; mysql -hdb2 -ulegacy_report -pChangeMe_Legacy_2026 -e 'SELECT COUNT(*) AS legacy_can_read FROM appdb.t_orders' 2>&1 | grep -v Warning
+legacy_can_read
+5235
+
+
+======== [db2] 坑：9.x 的 mysql 用戶端在非互動模式預設不處理 \G 等用戶端指令 ========  (2026-11-20 14:03:50)
+[db2]# mysql --version; mysql -e "SELECT @@version\\G"; echo "exit=$?"; echo "SELECT @@version\\G" | mysql; echo "exit=$?"
+mysql  Ver 9.7.2-3 for Linux on x86_64 (Percona Server (GPL), Release 3, Revision 45d3d00f)
+ERROR at line 1: Unknown command '\G'.
+exit=1
+ERROR at line 1: Unknown command '\G'.
+exit=1
+
+[db2]# mysql --commands -e "SELECT @@version\\G"; mysql --vertical -e "SELECT @@version"
+*************************** 1. row ***************************
+@@version: 9.7.2-3
+*************************** 1. row ***************************
+@@version: 9.7.2-3
+
+
+======== [db2] 預設值改變的變數（同一台 8.4 → 9.7） ========  (2026-11-20 14:03:51)
+[db2]# mysql -N -e "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables" > /root/vars-97.txt; join -t$'\t' <(sort /root/vars-84.txt) <(sort /root/vars-97.txt) | awk -F"\t" "\$2!=\$3" | grep -vE "^(version|version_comment|innodb_version|server_uuid|gtid_|pseudo|timestamp|warning_count|hostname|report_host)|_path$|^ssl_|^tls_|admin_ssl|^character_sets_dir|^lc_messages_dir|^basedir|^plugin_dir" | column -t -s$'\t' | sed "1i VARIABLE  8.4.11  9.7.2"
+VARIABLE  8.4.11  9.7.2
+back_log                                    500                                       10000
+binlog_transaction_dependency_history_size  25000                                     10000000
+build_id                                    6797d07de0adc4289abada44b7b8e23d0967f10a  e8e59cae153ca56003b525130c2e4928e2e87237
+caching_sha2_password_digest_rounds         5000                                      10000
+explain_format                              TRADITIONAL                               TREE
+explain_json_format_version                 1                                         2
+innodb_change_buffer_max_size               25                                        5
+innodb_change_buffering                     none                                      all
+innodb_log_writer_threads                   ON                                        OFF
+performance_schema_error_size               5799                                      6047
+performance_schema_max_statement_classes    228                                       242
+
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('0654f967-e4eb-11f1-bcc4-969437c2ccce:1-249', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.4.11-12 |     5238 | 11156630829826 |
++------+-----------+----------+----------------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+---------+----------+----------------+
+| node | version | rows_cnt | crc            |
++------+---------+----------+----------------+
+| db2  | 9.7.2-3 |     5238 | 11156630829826 |
++------+---------+----------+----------------+
+
+
+======== 混合版本：db1 8.4 → db2 9.7、db3 8.4 ========  (2026-11-20 14:03:53)
+
+======== [db3] 切換到 ps-97-lts 套件庫 ========  (2026-11-20 14:03:53)
+[db3]# percona-release disable ps-84-lts release >/dev/null 2>&1; percona-release enable ps-97-lts release 2>&1 | tail -2; ls /etc/yum.repos.d/ | grep percona; dnf -q --showduplicates list percona-server-server percona-mysql-shell 2>&1 | grep -v "^Installed\|^Available" | tail -6
+* Enabling the Percona Server for MySQL - PS 9.7- repository
+<*> All done!
+percona-prel-release.repo
+percona-ps-84-lts-release.repo.bak
+percona-ps-97-lts-release.repo
+percona-pxb-84-lts-release.repo
+percona-telemetry-release.repo
+percona-server-server.x86_64      8.4.11-12.1.el9      @ps-84-lts-release-x86_64
+percona-mysql-shell.x86_64        9.7.1-1.el9          ps-97-lts-release-x86_64 
+percona-mysql-shell.x86_64        9.7.1-2.el9          ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.1-1.1.el9        ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.2-2.1.el9        ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.2-3.1.el9        ps-97-lts-release-x86_64 
+
+
+======== [db3] 停複製、完整關機、備份 ========  (2026-11-20 14:04:01)
+[db3]# mysql -N -e "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables" > /root/vars-84.txt; wc -l < /root/vars-84.txt
+703
+
+[db3] mysql> STOP REPLICA; SET GLOBAL innodb_fast_shutdown = 0;
+
+[db3]# time systemctl stop mysqld; cp -a /var/lib/mysql /var/lib/mysql-8.4-backup && cp -a /etc/my.cnf.d /root/my.cnf.d-8.4 && du -sh /var/lib/mysql-8.4-backup
+
+real	0m0.976s
+user	0m0.007s
+sys	0m0.000s
+345M	/var/lib/mysql-8.4-backup
+
+
+======== [db3] 升級套件 ========  (2026-11-20 14:04:02)
+[db3]# dnf upgrade -y 'percona-server-*' percona-mysql-router percona-icu-data-files percona-mysql-shell 2>&1 | grep -E '^ percona|Complete|Error'; rpm -qa | grep -iE 'percona-(server|mysql|icu|xtrabackup)' | sort; mysqld --version
+ percona-icu-data-files          x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  2.3 M
+ percona-mysql-router            x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  9.8 M
+ percona-mysql-shell             x86_64  9.7.1-2.el9   ps-97-lts-release-x86_64  115 M
+ percona-server-client           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  3.6 M
+ percona-server-server           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64   71 M
+ percona-server-shared           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  1.5 M
+ percona-server-client-plugins   x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  3.8 M
+Complete!
+percona-icu-data-files-9.7.2-3.1.el9.x86_64
+percona-mysql-router-9.7.2-3.1.el9.x86_64
+percona-mysql-shell-9.7.1-2.el9.x86_64
+percona-server-client-9.7.2-3.1.el9.x86_64
+percona-server-client-plugins-9.7.2-3.1.el9.x86_64
+percona-server-server-9.7.2-3.1.el9.x86_64
+percona-server-shared-9.7.2-3.1.el9.x86_64
+percona-xtrabackup-84-8.4.0-7.1.el9.x86_64
+/usr/sbin/mysqld  Ver 9.7.2-3 for Linux on x86_64 (Percona Server (GPL), Release 3, Revision 45d3d00f)
+
+[db3]# cp /root/conf/lab08/replication-97.cnf /etc/my.cnf.d/replication.cnf; mysqld --validate-config --user=mysql; echo "exit=$?"
+2026-11-20T14:04:25.715984-00:00 0 [Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
+2026-11-20T14:04:25.716134-00:00 0 [Warning] [MY-010097] [Server] Insecure configuration for --secure-log-path: Current value does not restrict location of generated files. Consider setting it to a valid, non-empty path.
+exit=0
+
+
+======== [db3] 啟動 9.7 ========  (2026-11-20 14:04:25)
+[db3]# time systemctl start mysqld; systemctl is-active mysqld; grep -E "Data dictionary upgrad|Server upgrade|ready for connections|\[ERROR\]" /var/log/mysqld.log | tail -5
+
+real	0m5.868s
+user	0m0.000s
+sys	0m0.007s
+active
+2026-11-20T14:04:27.418927-00:00 1 [System] [MY-013413] [Server] Data dictionary upgrade from version '80300' to '90200' completed.
+2026-11-20T14:04:28.775942-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80411' to '90702' started.
+2026-11-20T14:04:31.526474-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80411' to '90702' completed.
+2026-11-20T14:04:31.738314-00:00 0 [System] [MY-011323] [Server] X Plugin ready for connections. Bind-address: '0.0.0.0' port: 33060, socket: /var/lib/mysql/mysqlx.sock
+2026-11-20T14:04:31.738344-00:00 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '9.7.2-3'  socket: '/var/lib/mysql/mysql.sock'  port: 3306  Percona Server (GPL), Release 3, Revision 45d3d00f.
+
+[db3] mysql> SELECT @@hostname, @@version, @@version_comment, @@super_read_only\G
+*************************** 1. row ***************************
+       @@hostname: db3
+        @@version: 9.7.2-3
+@@version_comment: Percona Server (GPL), Release 3, Revision 45d3d00f
+@@super_read_only: 1
+
+[db3]# sleep 3
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 0654f967-e4eb-11f1-bcc4-969437c2ccce:285-420
+            Executed_Gtid_Set: 0654f967-e4eb-11f1-bcc4-969437c2ccce:1-420
+                Auto_Position: 1
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('0654f967-e4eb-11f1-bcc4-969437c2ccce:1-420', 60) AS waited;   -- 0 = 已追上 db1
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.4.11-12 |     5409 | 11546921617159 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+---------+----------+----------------+
+| node | version | rows_cnt | crc            |
++------+---------+----------+----------------+
+| db3  | 9.7.2-3 |     5409 | 11546921617159 |
++------+---------+----------+----------------+
+
+[app]# echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; tail -1 /tmp/writer.log
+OK=410 ERR=0
+14:04:37.281 OK db1 db1
+
+
+======== 切換：db1（8.4）→ db2（9.7） ========  (2026-11-20 14:04:37)
+[db1] mysql> SET GLOBAL super_read_only = ON;
+
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('0654f967-e4eb-11f1-bcc4-969437c2ccce:1-421', 30) AS waited;
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('0654f967-e4eb-11f1-bcc4-969437c2ccce:1-421', 30) AS waited;
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> STOP REPLICA; RESET REPLICA ALL; SET PERSIST super_read_only = OFF; SET PERSIST read_only = OFF;
+
+[app]# echo db2 > /tmp/target; sleep 2; tail -1 /tmp/writer.log
+14:04:40.082 OK db2 db2
+
+[db3] mysql> STOP REPLICA; CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2'; START REPLICA;
+
+[db3]# sleep 3
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 09e79044-e4eb-11f1-8c23-521acbbb83f2:1-23
+            Executed_Gtid_Set: 0654f967-e4eb-11f1-bcc4-969437c2ccce:1-421,
+09e79044-e4eb-11f1-8c23-521acbbb83f2:1-23
+                Auto_Position: 1
+
+[app]# F=$(grep -m1 " ERR " /tmp/writer.log | cut -d" " -f1); L=$(grep -m1 "OK db2" /tmp/writer.log | cut -d" " -f1); echo "ERR 筆數: $(grep -c " ERR " /tmp/writer.log)  first ERR=$F  first OK on db2=$L"; python3 -c "import sys;from datetime import datetime as d;f=\"%H:%M:%S.%f\";print(\"寫入中斷秒數:\",(d.strptime(sys.argv[2],f)-d.strptime(sys.argv[1],f)).total_seconds())" $F $L
+ERR 筆數: 4  first ERR=14:04:37.509  first OK on db2=14:04:38.437
+寫入中斷秒數: 0.928
+
+
+======== 舊主庫 db1 升級到 9.7 再接回 ========  (2026-11-20 14:04:43)
+[db1]# printf 'super_read_only = ON\n' >> /etc/my.cnf.d/server-id.cnf
+
+
+======== [db1] 切換到 ps-97-lts 套件庫 ========  (2026-11-20 14:04:44)
+[db1]# percona-release disable ps-84-lts release >/dev/null 2>&1; percona-release enable ps-97-lts release 2>&1 | tail -2; ls /etc/yum.repos.d/ | grep percona; dnf -q --showduplicates list percona-server-server percona-mysql-shell 2>&1 | grep -v "^Installed\|^Available" | tail -6
+* Enabling the Percona Server for MySQL - PS 9.7- repository
+<*> All done!
+percona-prel-release.repo
+percona-ps-84-lts-release.repo.bak
+percona-ps-97-lts-release.repo
+percona-pxb-84-lts-release.repo
+percona-telemetry-release.repo
+percona-server-server.x86_64      8.4.11-12.1.el9      @ps-84-lts-release-x86_64
+percona-mysql-shell.x86_64        9.7.1-1.el9          ps-97-lts-release-x86_64 
+percona-mysql-shell.x86_64        9.7.1-2.el9          ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.1-1.1.el9        ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.2-2.1.el9        ps-97-lts-release-x86_64 
+percona-server-server.x86_64      9.7.2-3.1.el9        ps-97-lts-release-x86_64 
+
+
+======== [db1] 停複製、完整關機、備份 ========  (2026-11-20 14:04:51)
+[db1]# mysql -N -e "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables" > /root/vars-84.txt; wc -l < /root/vars-84.txt
+703
+
+[db1] mysql> STOP REPLICA; SET GLOBAL innodb_fast_shutdown = 0;
+
+[db1]# time systemctl stop mysqld; cp -a /var/lib/mysql /var/lib/mysql-8.4-backup && cp -a /etc/my.cnf.d /root/my.cnf.d-8.4 && du -sh /var/lib/mysql-8.4-backup
+
+real	0m11.534s
+user	0m0.003s
+sys	0m0.003s
+346M	/var/lib/mysql-8.4-backup
+
+
+======== [db1] 升級套件 ========  (2026-11-20 14:05:04)
+[db1]# dnf upgrade -y 'percona-server-*' percona-mysql-router percona-icu-data-files percona-mysql-shell 2>&1 | grep -E '^ percona|Complete|Error'; rpm -qa | grep -iE 'percona-(server|mysql|icu|xtrabackup)' | sort; mysqld --version
+ percona-icu-data-files          x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  2.3 M
+ percona-mysql-router            x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  9.8 M
+ percona-mysql-shell             x86_64  9.7.1-2.el9   ps-97-lts-release-x86_64  115 M
+ percona-server-client           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  3.6 M
+ percona-server-server           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64   71 M
+ percona-server-shared           x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  1.5 M
+ percona-server-client-plugins   x86_64  9.7.2-3.1.el9 ps-97-lts-release-x86_64  3.8 M
+Complete!
+percona-icu-data-files-9.7.2-3.1.el9.x86_64
+percona-mysql-router-9.7.2-3.1.el9.x86_64
+percona-mysql-shell-9.7.1-2.el9.x86_64
+percona-server-client-9.7.2-3.1.el9.x86_64
+percona-server-client-plugins-9.7.2-3.1.el9.x86_64
+percona-server-server-9.7.2-3.1.el9.x86_64
+percona-server-shared-9.7.2-3.1.el9.x86_64
+percona-xtrabackup-84-8.4.0-7.1.el9.x86_64
+/usr/sbin/mysqld  Ver 9.7.2-3 for Linux on x86_64 (Percona Server (GPL), Release 3, Revision 45d3d00f)
+
+[db1]# cp /root/conf/lab08/replication-97.cnf /etc/my.cnf.d/replication.cnf; mysqld --validate-config --user=mysql; echo "exit=$?"
+2026-11-20T14:05:25.727816-00:00 0 [Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
+2026-11-20T14:05:25.727997-00:00 0 [Warning] [MY-010097] [Server] Insecure configuration for --secure-log-path: Current value does not restrict location of generated files. Consider setting it to a valid, non-empty path.
+exit=0
+
+
+======== [db1] 啟動 9.7 ========  (2026-11-20 14:05:25)
+[db1]# time systemctl start mysqld; systemctl is-active mysqld; grep -E "Data dictionary upgrad|Server upgrade|ready for connections|\[ERROR\]" /var/log/mysqld.log | tail -5
+
+real	0m4.630s
+user	0m0.000s
+sys	0m0.007s
+active
+2026-11-20T14:05:26.868446-00:00 1 [System] [MY-013413] [Server] Data dictionary upgrade from version '80300' to '90200' completed.
+2026-11-20T14:05:28.012966-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80411' to '90702' started.
+2026-11-20T14:05:30.355103-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80411' to '90702' completed.
+2026-11-20T14:05:30.504003-00:00 0 [System] [MY-011323] [Server] X Plugin ready for connections. Bind-address: '0.0.0.0' port: 33060, socket: /var/lib/mysql/mysqlx.sock
+2026-11-20T14:05:30.504039-00:00 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '9.7.2-3'  socket: '/var/lib/mysql/mysql.sock'  port: 3306  Percona Server (GPL), Release 3, Revision 45d3d00f.
+
+[db1] mysql> SELECT @@hostname, @@version, @@version_comment, @@super_read_only\G
+*************************** 1. row ***************************
+       @@hostname: db1
+        @@version: 9.7.2-3
+@@version_comment: Percona Server (GPL), Release 3, Revision 45d3d00f
+@@super_read_only: 1
+
+[db1]# sleep 3
+
+[db1] mysql> SHOW REPLICA STATUS\G   （節錄）
+
+[db1] mysql> CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1; START REPLICA;
+
+[db1]# sleep 3
+
+[db1] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 09e79044-e4eb-11f1-8c23-521acbbb83f2:1-247
+            Executed_Gtid_Set: 0654f967-e4eb-11f1-bcc4-969437c2ccce:1-421,
+09e79044-e4eb-11f1-8c23-521acbbb83f2:1-247
+                Auto_Position: 1
+
+[db2] mysql> SHOW REPLICAS; SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_clients';
++-----------+------+------+-----------+--------------------------------------+
+| Server_Id | Host | Port | Source_Id | Replica_UUID                         |
++-----------+------+------+-----------+--------------------------------------+
+|         1 | db1  | 3306 |         2 | 0654f967-e4eb-11f1-bcc4-969437c2ccce |
+|         3 | db3  | 3306 |         2 | 0d5b3430-e4eb-11f1-a735-fecf52fd4ac0 |
++-----------+------+------+-----------+--------------------------------------+
++------------------------------+-------+
+| Variable_name                | Value |
++------------------------------+-------+
+| Rpl_semi_sync_source_clients | 2     |
++------------------------------+-------+
+
+
+======== 最終驗證 ========  (2026-11-20 14:05:37)
+[app]# touch /tmp/writer.stop; sleep 1; echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; grep " ERR " /tmp/writer.log | cut -d" " -f3- | sort | uniq -c
+OK=658 ERR=4
+      4 db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+
+[db2] mysql> SELECT src, COUNT(*) FROM appdb.t_orders WHERE note LIKE 'w-%' GROUP BY src;
++------+----------+
+| src  | COUNT(*) |
++------+----------+
+| db1  |      410 |
+| db2  |      248 |
++------+----------+
+
+[db1] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('0654f967-e4eb-11f1-bcc4-969437c2ccce:1-421,09e79044-e4eb-11f1-8c23-521acbbb83f2:1-248', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('0654f967-e4eb-11f1-bcc4-969437c2ccce:1-421,09e79044-e4eb-11f1-8c23-521acbbb83f2:1-248', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+---------+----------+----------------+
+| node | version | rows_cnt | crc            |
++------+---------+----------+----------------+
+| db2  | 9.7.2-3 |     5658 | 12096140050026 |
++------+---------+----------+----------------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+---------+----------+----------------+
+| node | version | rows_cnt | crc            |
++------+---------+----------+----------------+
+| db1  | 9.7.2-3 |     5658 | 12096140050026 |
++------+---------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+---------+----------+----------------+
+| node | version | rows_cnt | crc            |
++------+---------+----------+----------------+
+| db3  | 9.7.2-3 |     5658 | 12096140050026 |
++------+---------+----------+----------------+
+

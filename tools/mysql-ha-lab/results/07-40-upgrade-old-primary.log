@@ -1,0 +1,331 @@
+
+======== 步驟 1：db1 升級（不複製、super_read_only），設定檔先加 super_read_only 避免重啟後被誤寫 ========  (2026-11-20 13:49:28)
+[db1]# printf 'super_read_only = ON\n' >> /etc/my.cnf.d/server-id.cnf; cat /etc/my.cnf.d/server-id.cnf
+[mysqld]
+server_id   = 1
+report_host = db1
+super_read_only = ON
+
+[db1]# percona-release setup -y ps-84-lts 2>&1 | tail -1
+<*> All done!
+
+[db1] mysql> SET GLOBAL innodb_fast_shutdown = 0;
+
+[db1]# time systemctl stop mysqld; cp -a /var/lib/mysql /var/lib/mysql-8.0-backup && cp -a /etc/my.cnf.d /root/my.cnf.d-8.0 && du -sh /var/lib/mysql-8.0-backup
+
+real	0m11.305s
+user	0m0.007s
+sys	0m0.000s
+337M	/var/lib/mysql-8.0-backup
+
+[db1]# dnf upgrade -y 'percona-server-*' percona-mysql-router percona-icu-data-files percona-mysql-shell 2>&1 | grep -E '^ percona|Complete|Error'; mysqld --version
+ percona-icu-data-files x86_64 8.4.11-12.1.el9   ps-84-lts-release-x86_64 2.3 M
+ percona-mysql-router   x86_64 8.4.11-12.1.el9   ps-84-lts-release-x86_64 5.0 M
+ percona-mysql-shell    x86_64 8.4.10-2.el9      ps-84-lts-release-x86_64 108 M
+ percona-server-client  x86_64 8.4.11-12.1.el9   ps-84-lts-release-x86_64 3.2 M
+ percona-server-server  x86_64 8.4.11-12.1.el9   ps-84-lts-release-x86_64  71 M
+ percona-server-shared  x86_64 8.4.11-12.1.el9   ps-84-lts-release-x86_64 1.5 M
+Complete!
+/usr/sbin/mysqld  Ver 8.4.11-12 for Linux on x86_64 (Percona Server (GPL), Release 12, Revision 76aa4263)
+
+[db1]# cp /root/conf/lab07/replication-84.cnf /etc/my.cnf.d/replication.cnf; mysqld --validate-config --user=mysql; echo "exit=$?"
+2026-11-20T13:50:12.229265-00:00 0 [Warning] [MY-011070] [Server] 'binlog_format' is deprecated and will be removed in a future release.
+2026-11-20T13:50:12.229750-00:00 0 [Warning] [MY-010097] [Server] Insecure configuration for --secure-log-path: Current value does not restrict location of generated files. Consider setting it to a valid, non-empty path.
+exit=0
+
+[db1]# time systemctl start mysqld; grep -E "Server upgrade|\[ERROR\]" /var/log/mysqld.log | tail -3
+
+real	0m5.040s
+user	0m0.003s
+sys	0m0.004s
+2026-11-20T13:49:23.233051-00:00 0 [ERROR] [MY-013129] [Server] A message intended for a client cannot be sent there as no client-session is attached. Therefore, we're sending the information to the error-log instead: MY-001158 - Got an error reading communication packets
+2026-11-20T13:50:14.527814-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80046' to '80411' started.
+2026-11-20T13:50:17.259197-00:00 4 [System] [MY-013381] [Server] Server upgrade from '80046' to '80411' completed.
+
+
+======== 步驟 2：db1 接回新主庫 db2 ========  (2026-11-20 13:50:17)
+[db1] mysql> CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1; START REPLICA;
+
+[db1]# sleep 3
+
+[db1] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-240
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-240
+                Auto_Position: 1
+
+[db2] mysql> SHOW REPLICAS; SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_clients';
++-----------+------+------+-----------+--------------------------------------+
+| Server_Id | Host | Port | Source_Id | Replica_UUID                         |
++-----------+------+------+-----------+--------------------------------------+
+|         1 | db1  | 3306 |         2 | e3936cb3-e4e8-11f1-a3be-02dcceecbec0 |
+|         3 | db3  | 3306 |         2 | ea78dfe4-e4e8-11f1-9097-ae75a9ec8c8d |
++-----------+------+------+-----------+--------------------------------------+
++------------------------------+-------+
+| Variable_name                | Value |
++------------------------------+-------+
+| Rpl_semi_sync_source_clients | 2     |
++------------------------------+-------+
+
+[db1] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-241', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-241', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.4.11-12 |     5647 | 11964981039356 |
++------+-----------+----------+----------------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.4.11-12 |     5647 | 11964981039356 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.4.11-12 |     5647 | 11964981039356 |
++------+-----------+----------+----------------+
+
+
+======== 步驟 3：帳號改成 caching_sha2_password（在主庫 db2 執行，會複製到 db1、db3） ========  (2026-11-20 13:50:23)
+[db2] mysql> SELECT user, host, plugin FROM mysql.user WHERE user NOT LIKE 'mysql.%' ORDER BY user;
++-------------------+--------------+-----------------------+
+| user              | host         | plugin                |
++-------------------+--------------+-----------------------+
+| app               | 192.168.58.% | mysql_native_password |
+| monitor           | 192.168.58.% | caching_sha2_password |
+| percona.telemetry | localhost    | caching_sha2_password |
+| repl              | 192.168.58.% | mysql_native_password |
+| root              | localhost    | mysql_native_password |
++-------------------+--------------+-----------------------+
+
+[db2] mysql> ALTER USER 'app'@'192.168.58.%' IDENTIFIED WITH caching_sha2_password BY 'ChangeMe_App_2026';
+ALTER USER 'repl'@'192.168.58.%' IDENTIFIED WITH caching_sha2_password BY 'ChangeMe_Repl_2026';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'ChangeMe_Root_2026';
+
+[db2] mysql> SELECT user, host, plugin FROM mysql.user WHERE user NOT LIKE 'mysql.%' ORDER BY user;
++-------------------+--------------+-----------------------+
+| user              | host         | plugin                |
++-------------------+--------------+-----------------------+
+| app               | 192.168.58.% | caching_sha2_password |
+| monitor           | 192.168.58.% | caching_sha2_password |
+| percona.telemetry | localhost    | caching_sha2_password |
+| repl              | 192.168.58.% | caching_sha2_password |
+| root              | localhost    | caching_sha2_password |
++-------------------+--------------+-----------------------+
+
+[app]# sleep 2; tail -2 /tmp/writer.log; mysql -hdb2 -uapp -pChangeMe_App_2026 -e "SHOW SESSION STATUS LIKE \"Ssl_version\"" 2>&1 | grep -v Warning
+13:50:25.565 OK db2 db2
+13:50:25.797 OK db2 db2
+Variable_name	Value
+Ssl_version	TLSv1.3
+
+
+======== 步驟 4：坑：repl 改成 caching_sha2_password 後，從庫重連（快取清掉時）認證失敗 ========  (2026-11-20 13:50:26)
+[db2] mysql> FLUSH PRIVILEGES;   -- 清掉 caching_sha2_password 的認證快取，模擬主庫重啟
+
+[db3] mysql> STOP REPLICA IO_THREAD; START REPLICA IO_THREAD;
+
+[db3]# sleep 3
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Connecting
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: NULL
+                Last_IO_Errno: 2061
+                Last_IO_Error: Error connecting to source 'repl@db2:3306'. This was attempt 1/86400, with a delay of 60 seconds between attempts. Message: Authentication plugin 'caching_sha2_password' reported error: Authentication requires secure connection.
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 261120 13:50:26
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-258
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-258
+                Auto_Position: 1
+
+
+======== 解法：複製連線加 GET_SOURCE_PUBLIC_KEY = 1（或 SOURCE_SSL = 1） ========  (2026-11-20 13:50:29)
+[db1] mysql> STOP REPLICA; CHANGE REPLICATION SOURCE TO GET_SOURCE_PUBLIC_KEY = 1; START REPLICA;
+
+[db3] mysql> STOP REPLICA; CHANGE REPLICATION SOURCE TO GET_SOURCE_PUBLIC_KEY = 1; START REPLICA;
+
+[db3]# sleep 3
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 1
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:259-284
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-284
+                Auto_Position: 1
+
+[db1] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:274-285
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-285
+                Auto_Position: 1
+
+
+======== 步驟 5：拿掉 mysql_native_password = ON，從庫逐台重啟驗證 ========  (2026-11-20 13:50:33)
+[db1]# sed -i '/^mysql_native_password/d' /etc/my.cnf.d/replication.cnf; systemctl restart mysqld; mysql -e "SELECT @@hostname, @@version"; mysql -e "SELECT PLUGIN_NAME, PLUGIN_STATUS FROM information_schema.PLUGINS WHERE PLUGIN_NAME = 'mysql_native_password'"
+@@hostname	@@version
+db1	8.4.11-12
+PLUGIN_NAME	PLUGIN_STATUS
+mysql_native_password	DISABLED
+
+[db3]# sed -i '/^mysql_native_password/d' /etc/my.cnf.d/replication.cnf; systemctl restart mysqld; mysql -e "SELECT @@hostname, @@version"; mysql -e "SELECT PLUGIN_NAME, PLUGIN_STATUS FROM information_schema.PLUGINS WHERE PLUGIN_NAME = 'mysql_native_password'"
+@@hostname	@@version
+db3	8.4.11-12
+PLUGIN_NAME	PLUGIN_STATUS
+mysql_native_password	DISABLED
+
+[db2]# sed -i '/^mysql_native_password/d' /etc/my.cnf.d/replication.cnf; grep -c "^mysql_native_password" /etc/my.cnf.d/replication.cnf   # 主庫下次維護重啟時生效
+0
+
+[db1]# sleep 3
+
+[db1] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 1
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:287-318
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-318
+                Auto_Position: 1
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 1
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:296-318
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-318
+                Auto_Position: 1
+
+
+======== 最終驗證 ========  (2026-11-20 13:50:41)
+[db1] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db1        | 8.4.11-12 |           1 |                 1 |
++------------+-----------+-------------+-------------------+
+
+[db2] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db2        | 8.4.11-12 |           0 |                 0 |
++------------+-----------+-------------+-------------------+
+
+[db3] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db3        | 8.4.11-12 |           1 |                 1 |
++------------+-----------+-------------+-------------------+
+
+[app]# touch /tmp/writer.stop; sleep 1; echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; grep " ERR " /tmp/writer.log | cut -d" " -f3- | sort | uniq -c
+OK=723 ERR=3
+      3 db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+
+[db2] mysql> SELECT src, COUNT(*) FROM appdb.t_orders WHERE note LIKE 'w-%' GROUP BY src;
++------+----------+
+| src  | COUNT(*) |
++------+----------+
+| db1  |      406 |
+| db2  |      317 |
++------+----------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.4.11-12 |     5723 | 12117748487951 |
++------+-----------+----------+----------------+
+
+[db1] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db1  | 8.4.11-12 |     5723 | 12117748487951 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.4.11-12 |     5723 | 12117748487951 |
++------+-----------+----------+----------------+
+

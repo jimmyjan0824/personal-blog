@@ -1,0 +1,151 @@
+
+======== 切換前檢查 ========  (2026-11-20 13:49:19)
+[db2] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:179-413
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-413
+                Auto_Position: 1
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:327-413
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-413
+                Auto_Position: 1
+
+[db1] mysql> SELECT @@hostname, @@version, @@read_only, @@super_read_only;
++------------+-----------+-------------+-------------------+
+| @@hostname | @@version | @@read_only | @@super_read_only |
++------------+-----------+-------------+-------------------+
+| db1        | 8.0.46-37 |           0 |                 0 |
++------------+-----------+-------------+-------------------+
+
+[app]# echo "OK=$(grep -c " OK " /tmp/writer.log) ERR=$(grep -c " ERR " /tmp/writer.log)"; tail -1 /tmp/writer.log
+OK=405 ERR=0
+13:49:20.019 OK db1 db1
+
+
+======== 步驟 1：舊主庫 db1 停止寫入 ========  (2026-11-20 13:49:20)
+[db1] mysql> SET GLOBAL super_read_only = ON; SELECT @@GLOBAL.gtid_executed\G
+*************************** 1. row ***************************
+@@GLOBAL.gtid_executed: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416
+
+
+======== 步驟 2：等 db2、db3 套用完 db1 的所有交易 ========  (2026-11-20 13:49:20)
+[db2] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416', 30) AS waited;
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416', 30) AS waited;
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+
+======== 步驟 3：db2 升為主庫 ========  (2026-11-20 13:49:20)
+[db2] mysql> STOP REPLICA; RESET REPLICA ALL; SET PERSIST super_read_only = OFF; SET PERSIST read_only = OFF;
+
+
+======== 步驟 4：app 改寫 db2 ========  (2026-11-20 13:49:20)
+[app]# echo db2 > /tmp/target; sleep 2; tail -2 /tmp/writer.log
+13:49:22.828 OK db2 db2
+13:49:23.060 OK db2 db2
+
+
+======== 步驟 5：db3 改接 db2 ========  (2026-11-20 13:49:23)
+[db3] mysql> STOP REPLICA; CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1; START REPLICA;
+
+[db3]# sleep 3
+
+[db3] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-24
+            Executed_Gtid_Set: e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,
+e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-24
+                Auto_Position: 1
+
+[db2] mysql> SHOW REPLICAS; SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_clients'; SHOW GLOBAL STATUS LIKE 'Rpl_semi_sync_source_status';
++-----------+------+------+-----------+--------------------------------------+
+| Server_Id | Host | Port | Source_Id | Replica_UUID                         |
++-----------+------+------+-----------+--------------------------------------+
+|         3 | db3  | 3306 |         2 | ea78dfe4-e4e8-11f1-9097-ae75a9ec8c8d |
++-----------+------+------+-----------+--------------------------------------+
++------------------------------+-------+
+| Variable_name                | Value |
++------------------------------+-------+
+| Rpl_semi_sync_source_clients | 1     |
++------------------------------+-------+
++-----------------------------+-------+
+| Variable_name               | Value |
++-----------------------------+-------+
+| Rpl_semi_sync_source_status | ON    |
++-----------------------------+-------+
+
+
+======== 寫入中斷時間 ========  (2026-11-20 13:49:26)
+[app]# grep ERR /tmp/writer.log | head -3; echo "ERR 筆數: $(grep -c " ERR " /tmp/writer.log)"; F=$(grep -m1 " ERR " /tmp/writer.log | cut -d" " -f1); L=$(grep -m1 "OK db2" /tmp/writer.log | cut -d" " -f1); echo "first ERR=$F  first OK on db2=$L"; python3 -c "import sys;from datetime import datetime as d;f=\"%H:%M:%S.%f\";print(\"寫入中斷秒數:\",(d.strptime(sys.argv[2],f)-d.strptime(sys.argv[1],f)).total_seconds())" $F $L
+13:49:20.493 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+13:49:20.727 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+13:49:20.957 ERR db1 ERROR 1290 (HY000) at line 1: The MySQL server is running with the --read-only option so it cannot execute this statement
+ERR 筆數: 3
+first ERR=13:49:20.493  first OK on db2=13:49:21.191
+寫入中斷秒數: 0.698
+
+[db3] mysql> SELECT WAIT_FOR_EXECUTED_GTID_SET('e3936cb3-e4e8-11f1-a3be-02dcceecbec0:1-416,e6ef855f-e4e8-11f1-85e2-1e44fd980790:1-26', 60) AS waited;   -- 0 = 已追上 db2
++--------+
+| waited |
++--------+
+|      0 |
++--------+
+
+[db2] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db2  | 8.4.11-12 |     5432 | 11504456080635 |
++------+-----------+----------+----------------+
+
+[db3] mysql> SELECT @@hostname AS node, @@version AS version, COUNT(*) AS rows_cnt, SUM(CRC32(CONCAT_WS('#', id, note, src))) AS crc FROM appdb.t_orders;
++------+-----------+----------+----------------+
+| node | version   | rows_cnt | crc            |
++------+-----------+----------+----------------+
+| db3  | 8.4.11-12 |     5432 | 11504456080635 |
++------+-----------+----------+----------------+
+

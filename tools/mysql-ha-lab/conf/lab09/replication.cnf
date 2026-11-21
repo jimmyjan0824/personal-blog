@@ -1,0 +1,12 @@
+# /etc/my.cnf.d/replication.cnf（InnoDB ReplicaSet / Cluster 共用：AdminAPI 需要的複製設定）
+[mysqld]
+bind_address             = 0.0.0.0
+log_bin                  = mysql-bin
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+binlog_expire_logs_seconds = 604800
+sync_binlog              = 1
+relay_log                = relay-bin
+relay_log_recovery       = ON
+replica_parallel_workers = 8
+replica_preserve_commit_order = ON

@@ -1,0 +1,457 @@
+
+======== 步驟 1：四台初始化（GTID、ROW） ========  (2026-11-20 14:38:51)
+[db1] mysql> CREATE USER 'repl'@'192.168.58.%' IDENTIFIED BY 'ChangeMe_Repl_2026'; GRANT REPLICATION SLAVE ON *.* TO 'repl'@'192.168.58.%';
+
+[db2] mysql> CREATE USER 'repl'@'192.168.58.%' IDENTIFIED BY 'ChangeMe_Repl_2026'; GRANT REPLICATION SLAVE ON *.* TO 'repl'@'192.168.58.%';
+
+[db1] mysql> CREATE DATABASE sales; CREATE TABLE sales.orders (id INT AUTO_INCREMENT PRIMARY KEY, customer VARCHAR(30), amount DECIMAL(10,2), created_at DATETIME DEFAULT NOW());
+INSERT INTO sales.orders (customer, amount) VALUES ('alice', 120.00), ('bob', 75.50), ('carol', 300.00);
+
+[db2] mysql> CREATE DATABASE inventory; CREATE TABLE inventory.stock (sku VARCHAR(20) PRIMARY KEY, qty INT);
+INSERT INTO inventory.stock VALUES ('A-001', 50), ('B-002', 8), ('C-003', 0);
+CREATE DATABASE tmp_report; CREATE TABLE tmp_report.daily (d DATE PRIMARY KEY, total INT); INSERT INTO tmp_report.daily VALUES (CURDATE(), 58);
+
+[db1] mysql> SELECT @@server_uuid, @@GLOBAL.gtid_executed;
++--------------------------------------+------------------------------------------+
+| @@server_uuid                        | @@GLOBAL.gtid_executed                   |
++--------------------------------------+------------------------------------------+
+| 1b1f9ada-e4f0-11f1-bec6-f26a568cd969 | 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6 |
++--------------------------------------+------------------------------------------+
+
+[db2] mysql> SELECT @@server_uuid, @@GLOBAL.gtid_executed;
++--------------------------------------+------------------------------------------+
+| @@server_uuid                        | @@GLOBAL.gtid_executed                   |
++--------------------------------------+------------------------------------------+
+| 1de44f85-e4f0-11f1-9d02-3aa3db226f89 | 1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-9 |
++--------------------------------------+------------------------------------------+
+
+
+======== 步驟 2：db3 多來源複製：兩個通道 ch_sales（db1）、ch_inv（db2） ========  (2026-11-20 14:39:11)
+[db3] mysql> RESET BINARY LOGS AND GTIDS;
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='db1', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1, SOURCE_SSL=1 FOR CHANNEL 'ch_sales';
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='db2', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1, SOURCE_SSL=1 FOR CHANNEL 'ch_inv';
+CHANGE REPLICATION FILTER REPLICATE_IGNORE_DB = (tmp_report) FOR CHANNEL 'ch_inv';
+START REPLICA FOR CHANNEL 'ch_sales'; START REPLICA FOR CHANNEL 'ch_inv';
+SET PERSIST super_read_only = ON;
+
+[db3]# sleep 3
+
+[db3] mysql> SELECT CHANNEL_NAME, HOST, SERVICE_STATE FROM performance_schema.replication_connection_status JOIN performance_schema.replication_connection_configuration USING (CHANNEL_NAME);
++--------------+------+---------------+
+| CHANNEL_NAME | HOST | SERVICE_STATE |
++--------------+------+---------------+
+| ch_sales     | db1  | ON            |
+| ch_inv       | db2  | ON            |
++--------------+------+---------------+
+
+[db3] mysql> SELECT * FROM performance_schema.replication_applier_filters;
++--------------+---------------------+-------------+---------------------------------------+----------------------------+---------+
+| CHANNEL_NAME | FILTER_NAME         | FILTER_RULE | CONFIGURED_BY                         | ACTIVE_SINCE               | COUNTER |
++--------------+---------------------+-------------+---------------------------------------+----------------------------+---------+
+| ch_inv       | REPLICATE_IGNORE_DB | tmp_report  | CHANGE_REPLICATION_FILTER_FOR_CHANNEL | 2026-11-20 14:39:11.565095 |       0 |
++--------------+---------------------+-------------+---------------------------------------+----------------------------+---------+
+
+[db3] mysql> SHOW REPLICA STATUS FOR CHANNEL 'ch_sales'\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6,
+1de44f85-e4f0-11f1-9d02-3aa3db226f89:1
+                Auto_Position: 1
+                 Channel_Name: ch_sales
+
+[db3] mysql> SHOW REPLICA STATUS FOR CHANNEL 'ch_inv'\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: No
+          Replicate_Ignore_DB: tmp_report
+                   Last_Errno: 1396
+                   Last_Error: Coordinator stopped because there were error(s) in the worker(s). The most recent failure being: Worker 1 failed executing transaction '1de44f85-e4f0-11f1-9d02-3aa3db226f89:2' at source log mysql-bin.000002, end_log_pos 802. See error log and/or performance_schema.replication_applier_status_by_worker table for more details about this failure or others, if any.
+        Seconds_Behind_Source: NULL
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 1396
+               Last_SQL_Error: Coordinator stopped because there were error(s) in the worker(s). The most recent failure being: Worker 1 failed executing transaction '1de44f85-e4f0-11f1-9d02-3aa3db226f89:2' at source log mysql-bin.000002, end_log_pos 802. See error log and/or performance_schema.replication_applier_status_by_worker table for more details about this failure or others, if any.
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 261120 14:39:11
+           Retrieved_Gtid_Set: 1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-9
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6,
+1de44f85-e4f0-11f1-9d02-3aa3db226f89:1
+                Auto_Position: 1
+                 Channel_Name: ch_inv
+
+[db3] mysql> SELECT CHANNEL_NAME, LAST_ERROR_NUMBER, LAST_ERROR_MESSAGE FROM performance_schema.replication_applier_status_by_worker WHERE LAST_ERROR_NUMBER <> 0;
++--------------+-------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| CHANNEL_NAME | LAST_ERROR_NUMBER | LAST_ERROR_MESSAGE                                                                                                                                                                                                                                                                                                                                                                              |
++--------------+-------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ch_inv       |              1396 | Worker 1 failed executing transaction '1de44f85-e4f0-11f1-9d02-3aa3db226f89:2' at source log mysql-bin.000002, end_log_pos 802; Error 'Operation CREATE USER failed for 'repl'@'192.168.58.%'' on query. Default database: ''. Query: 'CREATE USER 'repl'@'192.168.58.%' IDENTIFIED WITH 'caching_sha2_password' AS '$A$005$F sI0m.;\naWl\n>btabTEQjTh2Uac/K2yuCXtQcPU18MY34LsWRIjJGElfcA'' |
++--------------+-------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+
+======== 坑 1：db1、db2 各自建了同一個 repl 帳號，ch_inv 套到 db2 的 CREATE USER 時撞到 ch_sales 已經建好的帳號 ========  (2026-11-20 14:39:15)
+[db3]# echo '出錯的交易: 1de44f85-e4f0-11f1-9d02-3aa3db226f89:2'
+出錯的交易: 1de44f85-e4f0-11f1-9d02-3aa3db226f89:2
+
+[db3] mysql> STOP REPLICA FOR CHANNEL 'ch_inv';
+SET GLOBAL super_read_only = OFF;
+SET GTID_NEXT = '1de44f85-e4f0-11f1-9d02-3aa3db226f89:2'; BEGIN; COMMIT; SET GTID_NEXT = 'AUTOMATIC';   -- 帳號 db3 已經有了，用空交易跳過
+SET GLOBAL super_read_only = ON;
+START REPLICA FOR CHANNEL 'ch_inv';
+
+[db3]# sleep 2
+
+[db3] mysql> SHOW REPLICA STATUS FOR CHANNEL 'ch_inv'\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: No
+          Replicate_Ignore_DB: tmp_report
+                   Last_Errno: 1049
+                   Last_Error: Coordinator stopped because there were error(s) in the worker(s). The most recent failure being: Worker 1 failed executing transaction '1de44f85-e4f0-11f1-9d02-3aa3db226f89:8' at source log mysql-bin.000002, end_log_pos 2210. See error log and/or performance_schema.replication_applier_status_by_worker table for more details about this failure or others, if any.
+        Seconds_Behind_Source: NULL
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 1049
+               Last_SQL_Error: Coordinator stopped because there were error(s) in the worker(s). The most recent failure being: Worker 1 failed executing transaction '1de44f85-e4f0-11f1-9d02-3aa3db226f89:8' at source log mysql-bin.000002, end_log_pos 2210. See error log and/or performance_schema.replication_applier_status_by_worker table for more details about this failure or others, if any.
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 261120 14:39:16
+           Retrieved_Gtid_Set: 1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-9
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6,
+1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-7
+                Auto_Position: 1
+                 Channel_Name: ch_inv
+
+[db3] mysql> SELECT CHANNEL_NAME, LAST_ERROR_NUMBER, LAST_ERROR_MESSAGE FROM performance_schema.replication_applier_status_by_worker WHERE LAST_ERROR_NUMBER <> 0;
++--------------+-------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| CHANNEL_NAME | LAST_ERROR_NUMBER | LAST_ERROR_MESSAGE                                                                                                                                                                                                                                                            |
++--------------+-------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ch_inv       |              1049 | Worker 1 failed executing transaction '1de44f85-e4f0-11f1-9d02-3aa3db226f89:8' at source log mysql-bin.000002, end_log_pos 2210; Error 'Unknown database 'tmp_report'' on query. Default database: ''. Query: 'CREATE TABLE tmp_report.daily (d DATE PRIMARY KEY, total INT)' |
++--------------+-------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+
+======== 坑 2：REPLICATE_IGNORE_DB 對 DDL（statement 格式）看的是「預設資料庫」，CREATE TABLE tmp_report.daily 沒被擋 ========  (2026-11-20 14:39:18)
+[db2]# mysqlbinlog --no-defaults $(ls /var/lib/mysql/mysql-bin.0* | tail -1) | grep -E '^(use|CREATE|INSERT)|GTID_NEXT=' | grep -B1 -E 'tmp_report' | head -8
+SET @@SESSION.GTID_NEXT= '1de44f85-e4f0-11f1-9d02-3aa3db226f89:7'/*!*/;
+CREATE DATABASE tmp_report
+SET @@SESSION.GTID_NEXT= '1de44f85-e4f0-11f1-9d02-3aa3db226f89:8'/*!*/;
+CREATE TABLE tmp_report.daily (d DATE PRIMARY KEY, total INT)
+
+
+======== 解法：改用 REPLICATE_WILD_IGNORE_TABLE（依實際的庫名.表名判斷），那筆交易就會被過濾，不需要跳過 ========  (2026-11-20 14:39:18)
+[db3] mysql> STOP REPLICA FOR CHANNEL 'ch_inv';
+CHANGE REPLICATION FILTER REPLICATE_IGNORE_DB = (), REPLICATE_WILD_IGNORE_TABLE = ('tmp_report.%') FOR CHANNEL 'ch_inv';
+START REPLICA FOR CHANNEL 'ch_inv';
+
+[db3]# sleep 2
+
+[db3] mysql> SELECT * FROM performance_schema.replication_applier_filters;
++--------------+-----------------------------+--------------+---------------------------------------+----------------------------+---------+
+| CHANNEL_NAME | FILTER_NAME                 | FILTER_RULE  | CONFIGURED_BY                         | ACTIVE_SINCE               | COUNTER |
++--------------+-----------------------------+--------------+---------------------------------------+----------------------------+---------+
+| ch_inv       | REPLICATE_IGNORE_DB         |              | CHANGE_REPLICATION_FILTER_FOR_CHANNEL | 2026-11-20 14:39:18.889240 |       0 |
+| ch_inv       | REPLICATE_WILD_IGNORE_TABLE | tmp_report.% | CHANGE_REPLICATION_FILTER_FOR_CHANNEL | 2026-11-20 14:39:18.889240 |       3 |
++--------------+-----------------------------+--------------+---------------------------------------+----------------------------+---------+
+
+[db3] mysql> SHOW REPLICA STATUS FOR CHANNEL 'ch_inv'\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+  Replicate_Wild_Ignore_Table: tmp_report.%
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-9
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6,
+1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-9
+                Auto_Position: 1
+                 Channel_Name: ch_inv
+
+[db3] mysql> SHOW DATABASES; SELECT @@GLOBAL.gtid_executed\G
++--------------------+
+| Database           |
++--------------------+
+| information_schema |
+| inventory          |
+| mysql              |
+| performance_schema |
+| sales              |
+| sys                |
++--------------------+
+*************************** 1. row ***************************
+@@GLOBAL.gtid_executed: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-6,
+1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-9
+
+[db3] mysql> SELECT 'sales.orders' AS t, COUNT(*) FROM sales.orders UNION ALL SELECT 'inventory.stock', COUNT(*) FROM inventory.stock;
++-----------------+----------+
+| t               | COUNT(*) |
++-----------------+----------+
+| sales.orders    |        3 |
+| inventory.stock |        3 |
++-----------------+----------+
+
+[db3]# printf '[mysqld]\nreplicate-wild-ignore-table = ch_inv:tmp_report.%%\n' > /etc/my.cnf.d/filters.cnf; cat /etc/my.cnf.d/filters.cnf   # 寫進設定檔，重啟後仍有效
+[mysqld]
+replicate-wild-ignore-table = ch_inv:tmp_report.%
+
+
+======== 步驟 3：兩邊同時寫入，db3 都收到；tmp_report 不管從哪個預設資料庫改都被擋掉 ========  (2026-11-20 14:39:21)
+[db1] mysql> INSERT INTO sales.orders (customer, amount) VALUES ('dave', 42.00);
+
+[db2] mysql> UPDATE inventory.stock SET qty = qty - 1 WHERE sku = 'A-001'; INSERT INTO tmp_report.daily VALUES (CURDATE() - INTERVAL 1 DAY, 61);
+USE inventory; CREATE TABLE tmp_report.weekly (w INT PRIMARY KEY); INSERT INTO inventory.stock VALUES ('D-004', 12);
+
+[db3]# sleep 2
+
+[db3] mysql> SELECT * FROM sales.orders ORDER BY id DESC LIMIT 2; SELECT * FROM inventory.stock ORDER BY sku;
++----+----------+--------+---------------------+
+| id | customer | amount | created_at          |
++----+----------+--------+---------------------+
+|  4 | dave     |  42.00 | 2026-11-20 14:39:21 |
+|  3 | carol    | 300.00 | 2026-11-20 14:39:10 |
++----+----------+--------+---------------------+
++-------+------+
+| sku   | qty  |
++-------+------+
+| A-001 |   49 |
+| B-002 |    8 |
+| C-003 |    0 |
+| D-004 |   12 |
++-------+------+
+
+[db3] mysql> SHOW DATABASES LIKE 'tmp%'; SELECT FILTER_NAME, FILTER_RULE, COUNTER FROM performance_schema.replication_applier_filters WHERE FILTER_RULE <> '';
++-----------------------------+--------------+---------+
+| FILTER_NAME                 | FILTER_RULE  | COUNTER |
++-----------------------------+--------------+---------+
+| REPLICATE_WILD_IGNORE_TABLE | tmp_report.% |       5 |
++-----------------------------+--------------+---------+
+
+[db3] mysql> SHOW REPLICA STATUS FOR CHANNEL 'ch_inv'\G   （節錄）
+                  Source_Host: db2
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+  Replicate_Wild_Ignore_Table: tmp_report.%
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 0
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-13
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-7,
+1de44f85-e4f0-11f1-9d02-3aa3db226f89:1-13
+                Auto_Position: 1
+                 Channel_Name: ch_inv
+
+
+======== 步驟 4：db4 延遲從庫：落後 db1 60 秒 ========  (2026-11-20 14:39:24)
+[db4] mysql> RESET BINARY LOGS AND GTIDS;
+CHANGE REPLICATION SOURCE TO SOURCE_HOST='db1', SOURCE_USER='repl', SOURCE_PASSWORD='ChangeMe_Repl_2026', SOURCE_AUTO_POSITION=1, SOURCE_SSL=1, SOURCE_DELAY=60;
+START REPLICA; SET PERSIST super_read_only = ON;
+
+[db4]# sleep 65
+
+[db4] mysql> SELECT COUNT(*) FROM sales.orders;
++----------+
+| COUNT(*) |
++----------+
+|        4 |
++----------+
+
+[db1] mysql> INSERT INTO sales.orders (customer, amount) VALUES ('erin', 18.00), ('frank', 999.00);
+
+[db4]# sleep 3
+
+[db4] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 3
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+                    SQL_Delay: 60
+          SQL_Remaining_Delay: 58
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-8
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-7
+                Auto_Position: 1
+
+[db4] mysql> SELECT COUNT(*) AS db4_rows FROM sales.orders;
++----------+
+| db4_rows |
++----------+
+|        4 |
++----------+
+
+[db1] mysql> SELECT COUNT(*) AS db1_rows FROM sales.orders;
++----------+
+| db1_rows |
++----------+
+|        6 |
++----------+
+
+
+======== 步驟 5：事故：有人在主庫誤刪了 sales.orders ========  (2026-11-20 14:40:33)
+[db1] mysql> SELECT NOW(); DROP TABLE sales.orders;
++---------------------+
+| NOW()               |
++---------------------+
+| 2026-11-20 14:40:34 |
++---------------------+
+
+[db3] mysql> SELECT COUNT(*) FROM sales.orders;
+ERROR 1146 (42S02) at line 1: Table 'sales.orders' doesn't exist
+
+
+======== 步驟 6：在延遲從庫上停住 SQL 執行緒，找出 DROP 的 GTID，套用到它之前為止 ========  (2026-11-20 14:40:34)
+[db4] mysql> STOP REPLICA SQL_THREAD;
+
+[db1]# mysqlbinlog --no-defaults -v $(ls /var/lib/mysql/mysql-bin.0* | tail -1) | grep -B12 'DROP TABLE' | grep -E 'GTID_NEXT|DROP TABLE'
+SET @@SESSION.GTID_NEXT= '1b1f9ada-e4f0-11f1-bec6-f26a568cd969:9'/*!*/;
+DROP TABLE `sales`.`orders` /* generated by server */
+
+[db4] mysql> START REPLICA SQL_THREAD UNTIL SQL_BEFORE_GTIDS = '1b1f9ada-e4f0-11f1-bec6-f26a568cd969:9';
+
+[db4]# sleep 3
+
+[db4] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 8
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+                    SQL_Delay: 60
+          SQL_Remaining_Delay: 53
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-9
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-7
+                Auto_Position: 1
+
+[db4] mysql> SELECT COUNT(*) AS rows_on_db4, MAX(id) FROM sales.orders;
++-------------+---------+
+| rows_on_db4 | MAX(id) |
++-------------+---------+
+|           4 |       4 |
++-------------+---------+
+
+
+======== 坑 3：UNTIL 一樣要等 SOURCE_DELAY，GTID :8（erin、frank）還在排隊；先把延遲歸零再套用 ========  (2026-11-20 14:40:38)
+[db4] mysql> STOP REPLICA SQL_THREAD;
+CHANGE REPLICATION SOURCE TO SOURCE_DELAY = 0;
+START REPLICA SQL_THREAD UNTIL SQL_BEFORE_GTIDS = '1b1f9ada-e4f0-11f1-bec6-f26a568cd969:9';
+
+[db4]# sleep 3
+
+[db4] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: No
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: NULL
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-9
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-8
+                Auto_Position: 1
+
+[db4] mysql> SELECT COUNT(*) AS rows_on_db4, MAX(id) FROM sales.orders; SELECT * FROM sales.orders ORDER BY id;
++-------------+---------+
+| rows_on_db4 | MAX(id) |
++-------------+---------+
+|           6 |       6 |
++-------------+---------+
++----+----------+--------+---------------------+
+| id | customer | amount | created_at          |
++----+----------+--------+---------------------+
+|  1 | alice    | 120.00 | 2026-11-20 14:39:10 |
+|  2 | bob      |  75.50 | 2026-11-20 14:39:10 |
+|  3 | carol    | 300.00 | 2026-11-20 14:39:10 |
+|  4 | dave     |  42.00 | 2026-11-20 14:39:21 |
+|  5 | erin     |  18.00 | 2026-11-20 14:40:30 |
+|  6 | frank    | 999.00 | 2026-11-20 14:40:30 |
++----+----------+--------+---------------------+
+
+
+======== 步驟 7：從延遲從庫匯出這張表，匯回主庫 ========  (2026-11-20 14:40:41)
+[db4]# mysqldump --set-gtid-purged=OFF --single-transaction sales orders > /root/orders.sql; ls -l /root/orders.sql
+-rw-r--r-- 1 root root 3278 Nov 20 14:40 /root/orders.sql
+
+# 主機端：把 db4:/root/orders.sql 複製到 db1（實務上用 scp）
+[db1]# mysql sales < /root/orders.sql; mysql -e "SELECT COUNT(*) AS restored_rows FROM sales.orders; SELECT * FROM sales.orders ORDER BY id"
+restored_rows
+6
+id	customer	amount	created_at
+1	alice	120.00	2026-11-20 14:39:10
+2	bob	75.50	2026-11-20 14:39:10
+3	carol	300.00	2026-11-20 14:39:10
+4	dave	42.00	2026-11-20 14:39:21
+5	erin	18.00	2026-11-20 14:40:30
+6	frank	999.00	2026-11-20 14:40:30
+
+[db3]# sleep 2
+
+[db3] mysql> SELECT COUNT(*) FROM sales.orders;
++----------+
+| COUNT(*) |
++----------+
+|        6 |
++----------+
+
+
+======== 延遲從庫恢復正常延遲複製 ========  (2026-11-20 14:40:44)
+[db4] mysql> CHANGE REPLICATION SOURCE TO SOURCE_DELAY = 60; START REPLICA SQL_THREAD;
+
+[db4]# sleep 2
+
+[db4] mysql> SHOW REPLICA STATUS\G   （節錄）
+                  Source_Host: db1
+           Replica_IO_Running: Yes
+          Replica_SQL_Running: Yes
+                   Last_Errno: 0
+                   Last_Error: 
+        Seconds_Behind_Source: 13
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+                    SQL_Delay: 60
+          SQL_Remaining_Delay: 48
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+           Retrieved_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-14
+            Executed_Gtid_Set: 1b1f9ada-e4f0-11f1-bec6-f26a568cd969:1-8
+                Auto_Position: 1
+
